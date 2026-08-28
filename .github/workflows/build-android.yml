@@ -172,20 +172,28 @@ jobs:
             /home/runner/.mozbuild/android-ndk-r29
           bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"
           test -f "$MOZCONFIG"
-          # Bootstrap follows the x86_64 runner architecture. Replace that
-          # generated target so Gecko is compiled for this matrix job's APK ABI.
+          # GNU config.guess identifies the x86_64 runner as
+          # x86_64-pc-linux-gnu, while Rust uses x86_64-unknown-linux-gnu.
+          # New Rust releases can expose several compatible GNU/Linux targets,
+          # so Firefox may not be able to infer the Rust host unambiguously.
+          # Normalize the build host explicitly, then select this matrix job's
+          # Android target as before.
           sed -i -E \
-            '/^[[:space:]]*ac_add_options[[:space:]]+--target=/d' \
+            -e '/^[[:space:]]*ac_add_options[[:space:]]+--host=/d' \
+            -e '/^[[:space:]]*ac_add_options[[:space:]]+--target=/d' \
             "$MOZCONFIG"
           {
             echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/$MOZ_OBJDIR_NAME"
+            echo "ac_add_options --host=x86_64-unknown-linux-gnu"
             echo "ac_add_options --target=$RFIREFOX_TARGET"
             echo "ac_add_options --enable-release"
             echo "ac_add_options --disable-debug"
             echo "ac_add_options --disable-debug-symbols"
             echo "ac_add_options --enable-optimize"
           } >> "$MOZCONFIG"
+          test "$(grep -Ec '^[[:space:]]*ac_add_options[[:space:]]+--host=' "$MOZCONFIG")" -eq 1
           test "$(grep -Ec '^[[:space:]]*ac_add_options[[:space:]]+--target=' "$MOZCONFIG")" -eq 1
+          grep -F "ac_add_options --host=x86_64-unknown-linux-gnu" "$MOZCONFIG"
           grep -F "ac_add_options --target=$RFIREFOX_TARGET" "$MOZCONFIG"
 
       - name: Upload bootstrap diagnostics
