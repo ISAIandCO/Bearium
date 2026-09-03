@@ -5,7 +5,7 @@ on:
   schedule:
     # GitHub cron uses UTC. Check on five fixed dates each month. A release that
     # already exists for the current Firefox version is skipped before the build.
-    - cron: "17 3 1,7,14,21,28 * *"
+    - cron: "0 23 * * *"
 
 permissions:
   contents: write
