@@ -18,7 +18,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         trigger_section = self.workflow.split("permissions:", 1)[0]
         self.assertIn("workflow_dispatch:", trigger_section)
         self.assertIn("schedule:", trigger_section)
-        self.assertIn('- cron: "17 3 1,7,14,21,28 * *"', trigger_section)
+        self.assertIn('- cron: "00 23 * * *"', trigger_section)
         self.assertNotIn("push:", trigger_section)
         self.assertNotIn("pull_request:", trigger_section)
 
