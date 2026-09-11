@@ -54,3 +54,7 @@ class NativePolicyTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node.js required for UI checks')
     def test_privileged_permission_ui(self):
         subprocess.run(['node', 'tests/native-policy-ui.cjs'], cwd=native_policy.ROOT, check=True)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node.js required for service checks')
+    def test_tab_diagnostics_and_permission_expiry(self):
+        subprocess.run(['node', 'tests/native-policy-service.cjs'], cwd=native_policy.ROOT, check=True)

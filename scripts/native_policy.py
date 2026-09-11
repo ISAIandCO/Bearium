@@ -92,7 +92,7 @@ def verifier_h(source: str) -> str:
 
 
 def verifier_cpp(source: str) -> str:
-    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
+    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "prtime.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
     init = """
   // Rufox extra trust is limited to TLS servers; policy is checked below.
   mTLSServerRootInputs = mThirdPartyRootInputs.Clone();
@@ -102,6 +102,10 @@ def verifier_cpp(source: str) -> str:
   }
   Preferences::GetCString("security.rufox.exceptions", mRufoxExceptions);
   Preferences::GetCString("security.rufox.private_exceptions", mRufoxPrivateExceptions);
+  if (!mRufoxExceptions.IsEmpty()) mRufoxExceptions.Append(',');
+  nsAutoCString sessionExceptions;
+  Preferences::GetCString("security.rufox.session_exceptions", sessionExceptions);
+  mRufoxExceptions.Append(sessionExceptions);
   mRufoxHardened = Preferences::GetBool("security.rufox.hardened", false);
   mRufoxCTVerifier = MakeUnique<MultiLogCTVerifier>();
   for (const auto& log : kRufoxCTLogs) {
@@ -166,6 +170,7 @@ def about_components(source):
 
 def jar(source):
     return once(source, "   content/global/aboutAbout.js", """   content/global/rufoxProtection.html
+   content/global/rufoxLogMetadata.js
    content/global/rufoxProtection.js
    content/global/rufoxProtection.css
    content/global/aboutAbout.js""")
@@ -173,15 +178,15 @@ def jar(source):
 
 def trust_panel(source):
     source = once(source, "                            ProtectionPanel(", """                            androidx.compose.foundation.layout.Column {
-                            androidx.compose.material3.TextButton(onClick = {
+                            RufoxProtectionSummary(
+                                engine = sessionState?.engineState?.engineSession,
+                                onOpen = {
                                 components.useCases.sessionUseCases.loadUrl(
                                     "about:rufox-protection#url=" + Uri.encode(args.url),
                                     sessionId = args.sessionId,
                                 )
                                 dismiss()
-                            }) {
-                                androidx.compose.material3.Text("Защита сертификатов · CAnttRUst")
-                            }
+                            })
                             ProtectionPanel(""")
     return once(source, """                        }
 
@@ -269,11 +274,28 @@ def install(transforms):
     transforms[Path("security/manager/ssl/CommonSocketControl.cpp")] = common_socket
     transforms[Path("netwerk/base/SSLTokensCache.cpp")] = token_cache
     transforms[Path("security/certverifier/moz.build")] = cert_build
+    try:
+        from . import native_reporting, native_frontend
+    except ImportError:
+        import native_reporting, native_frontend
+    native_reporting.install(transforms)
+    native_frontend.install(transforms, once)
 
 
 def generated_files():
     result = {Path("security/certverifier/RufoxCTLogs.h"): log_header()}
+    logs = json.loads((NATIVE / "ct-log-list.json").read_text())
+    metadata = {"version": logs["version"], "timestamp": logs["log_list_timestamp"], "logs": {}}
+    for operator in logs["operators"]:
+        for log in operator["logs"]:
+            identity = base64.b64decode(log["log_id"]).hex()
+            metadata["logs"][identity] = {"name": log["description"], "operator": operator["name"],
+                "state": next(iter(log["state"])), "interval": log["temporal_interval"]}
+    result[Path("toolkit/content/rufoxLogMetadata.js")] = "const RufoxLogMetadata = " + json.dumps(metadata, ensure_ascii=True) + ";\n"
+
     result[Path("security/certverifier/RufoxPolicyHelpers.h")] = (NATIVE / "RufoxPolicyHelpers.h").read_text()
     for name in ("rufoxProtection.html", "rufoxProtection.js", "rufoxProtection.css"):
         result[Path("toolkit/content") / name] = (NATIVE / name).read_text()
+    result[Path("mobile/shared/modules/geckoview/RufoxProtection.sys.mjs")] = (NATIVE / "RufoxProtection.sys.mjs").read_text()
+    result[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/trustpanel/RufoxProtectionSummary.kt")] = (NATIVE / "RufoxProtectionSummary.kt").read_text()
     return result

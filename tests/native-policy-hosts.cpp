@@ -8,6 +8,10 @@ int main() {
   for (auto host : {"ru", ".ru", "bank.ru.evil.com", "notru", "127.0.0.1", "::1", ""}) {
     assert(!AllowedZone(host));
   }
+  assert(HasException("bank.ru|all|200", "bank.ru", "ct", 199));
+  assert(!HasException("bank.ru|all|200", "bank.ru", "ct", 200));
+  assert(!HasException("bank.ru|all|oops", "bank.ru", "ct", 199));
+  assert(!HasException("bank.ru|all|200", "bank.ru", "ct"));
   auto rules = "bank.ru|zone,other.com|all,ct.ru|ct";
   assert(HasException(rules, "bank.ru", "zone"));
   assert(!HasException(rules, "bank.ru", "ct"));
