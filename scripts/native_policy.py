@@ -275,11 +275,12 @@ def install(transforms):
     transforms[Path("netwerk/base/SSLTokensCache.cpp")] = token_cache
     transforms[Path("security/certverifier/moz.build")] = cert_build
     try:
-        from . import native_reporting, native_frontend
+        from . import native_reporting, native_frontend, native_one_shot
     except ImportError:
-        import native_reporting, native_frontend
+        import native_reporting, native_frontend, native_one_shot
     native_reporting.install(transforms)
     native_frontend.install(transforms, once)
+    native_one_shot.install(transforms, once)
 
 
 def generated_files():

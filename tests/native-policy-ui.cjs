@@ -4,13 +4,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 function page(privateMode = false, target = 'https://EXAMPLE.ru/a') {
   const normal = new Map(), defaults = new Map(), observers = new Map();
-  let cancelled = 0;
+  let cancelled = 0, oneShots = 0, navigations = 0;
   function branch(map) {
     return { getStringPref: (k, fallback) => map.get(k) ?? fallback,
       setStringPref: (k, v) => map.set(k, v), getBoolPref: (k, v) => map.get(k) ?? v, setBoolPref: (k, v) => map.set(k, v) };
   }
   function element() {
-    return {value: '', hidden: true, textContent: '', children: [], handlers: {}, dataset: {}, options: [{}],
+    return {value: '', hidden: true, textContent: '', children: [], handlers: {}, dataset: {}, options: [{}, {}, {}],
       querySelectorAll() {return this.children.flatMap(s => s.children.flatMap(l => l.children.filter(c => c.type === 'checkbox')));},
       addEventListener(k, fn) {this.handlers[k] = fn;},
       append(...items) {this.children.push(...items);},
@@ -26,16 +26,19 @@ function page(privateMode = false, target = 'https://EXAMPLE.ru/a') {
       removeObserver: (_, topic) => observers.delete(topic),
       notifyObservers: (_, topic) => {if (topic === 'net:cancel-all-connections') cancelled++;}}};
   vm.runInNewContext(fs.readFileSync('native/rufoxProtection.js','utf8'), {
-    ChromeUtils: {importESModule: () => ({PrivateBrowsingUtils: {isContentWindowPrivate: () => privateMode}, RufoxProtection: {snapshot: () => ({available:true, total:0, blocked:0, domains:[]})}})},
+    ChromeUtils: {importESModule: () => ({PrivateBrowsingUtils: {isContentWindowPrivate: () => privateMode}, RufoxProtection: {armOneShot() {oneShots++;}, cancelOneShot() {}, snapshot: () => ({available:true, total:0, blocked:0, domains:[]})}})},
     RufoxLogMetadata: {version:'test',timestamp:'2026-01-01',logs:{}},
     setInterval: () => 1, clearInterval() {},
-    Services, window: {addEventListener() {}, browsingContext: {top: {embedderElement:{}}}}, URLSearchParams, location: {hash:'#url='+encodeURIComponent(target)},
+    Services, window: {addEventListener() {}, browsingContext: {top: {embedderElement:{}}}}, URLSearchParams, location: {hash:'#url='+encodeURIComponent(target),replace() {navigations++;}},
     document: {getElementById:get, createElement:element, createTextNode:v=>v},
   });
-  return {get, normal, defaults, observers, cancelled:()=>cancelled,
+  return {get, normal, defaults, observers, cancelled:()=>cancelled, oneShots:()=>oneShots, navigations:()=>navigations,
     click(trusted=true) {get('allow').handlers.click({isTrusted:trusted});}};
 }
 const p = page();
+p.get('open-once').handlers.click({isTrusted:false});assert.equal(p.oneShots(),0);
+p.get('open-once').handlers.click({isTrusted:true});assert.equal(p.oneShots(),1);
+assert.equal(p.navigations(),1);assert.equal(p.normal.size,0);assert.equal(p.defaults.size,0);
 assert.equal(p.get('hosts').value, 'example.ru');
 p.click(false);
 assert.equal(p.normal.size, 0, 'scripted clicks cannot grant permissions');

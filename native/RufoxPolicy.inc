@@ -5,7 +5,7 @@ Result CertVerifier::VerifyRufoxPolicy(
     NSSCertDBTrustDomain& trustDomain,
     const nsTArray<nsTArray<uint8_t>>& builtChain, Input sctsFromTLS,
     Time time, const char* hostname, const OriginAttributes& originAttributes,
-    CertificateTransparencyInfo* ctInfo) {
+    CertificateTransparencyInfo* ctInfo, bool rufoxOneShot) {
   bool protectedChain = false;
   for (const auto& bytes : builtChain) {
     Input cert;
@@ -28,8 +28,8 @@ Result CertVerifier::VerifyRufoxPolicy(
                                    ? mRufoxPrivateExceptions : mRufoxExceptions;
   std::string_view hostView(host.get(), host.Length());
   std::string_view exceptionsView(exceptions.get(), exceptions.Length());
-  bool zoneException = rufox::HasException(exceptionsView, hostView, "zone", PR_Now() / PR_USEC_PER_SEC);
-  bool ctException = rufox::HasException(exceptionsView, hostView, "ct", PR_Now() / PR_USEC_PER_SEC);
+  bool zoneException = rufoxOneShot || rufox::HasException(exceptionsView, hostView, "zone", PR_Now() / PR_USEC_PER_SEC);
+  bool ctException = rufoxOneShot || rufox::HasException(exceptionsView, hostView, "ct", PR_Now() / PR_USEC_PER_SEC);
   bool allowedZone = rufox::AllowedZone(hostView);
   CTVerifyResult result;
   nsAutoCString sctDetails;
@@ -50,6 +50,8 @@ Result CertVerifier::VerifyRufoxPolicy(
       out.Append(zoneException ? "true" : "false");
       out.AppendLiteral(",\"ctException\":");
       out.Append(ctException ? "true" : "false");
+      out.AppendLiteral(",\"oneShot\":");
+      out.Append(rufoxOneShot ? "true" : "false");
       out.AppendLiteral(",\"hardened\":");
       out.Append(mRufoxHardened ? "true" : "false");
       out.AppendLiteral(",\"ctReason\":\"");

@@ -1,7 +1,7 @@
 /* MPL-2.0. Parent-process, per-tab diagnostics. No browsing history on disk. */
 import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
-const TOPICS = ["http-on-modify-request", "http-on-examine-response",
+const TOPICS = ["http-on-rufox-request", "http-on-modify-request", "http-on-examine-response",
   "http-on-examine-cached-response", "http-on-examine-merged-response",
   "http-on-failed-opening-request"];
 const tabs = new Map();
@@ -44,6 +44,7 @@ function expirePermissions() {
 const policyObserver = {
   observe(_subject, topic) {
     if (topic === "last-pb-context-exited") {
+      for (const tab of tabs.values()) if (tab.oneShot?.privateMode) clearOneShot(tab);
       Services.prefs.getDefaultBranch("").setStringPref("security.rufox.private_exceptions", "");
       Services.obs.notifyObservers(null, "net:cancel-all-connections");
     }
@@ -52,13 +53,31 @@ const policyObserver = {
   },
 };
 function fresh() {
-  return { domains: new Map(), recent: [], blocked: 0, total: 0, truncated: false, url: "" };
+  return { domains: new Map(), recent: [], blocked: 0, total: 0, truncated: false, unavailable: false, mainReport: null, url: "" };
 }
 function tabFor(channel) {
   const info = channel.loadInfo;
   const context = BrowsingContext.get(info.browsingContextID || info.topBrowsingContextID);
   const browser = context?.top?.embedderElement;
   return tabs.get(browser);
+}
+// A grant is held by the parent UI, never by a preference or a content process.
+function clearOneShot(tab) {
+  if (!tab?.oneShot) return;
+  clearTimeout(tab.oneShot.timer);
+  delete tab.oneShot;
+}
+function consumeOneShot(channel, tab) {
+  const grant = tab?.oneShot;
+  if (!grant) return;
+  if (Date.now() >= grant.expires) { clearOneShot(tab); return; }
+  const info = channel.loadInfo;
+  if (info.externalContentPolicyType !== Ci.nsIContentPolicy.TYPE_DOCUMENT) return;
+  // A navigation to another URL cancels the grant, including a redirect.
+  const matches = channel.URI.specIgnoringRef === grant.url &&
+    Boolean(info.originAttributes.privateBrowsingId) === grant.privateMode;
+  clearOneShot(tab);
+  if (matches) channel.QueryInterface(Ci.nsIHttpChannelInternal).grantRufoxOneShot();
 }
 function bind(channel, tab) {
   if (!bindings.has(channel)) bindings.set(channel, { tab, page: tab.page, seen: false });
@@ -74,11 +93,17 @@ function collect(channel) {
   binding.seen = true;
   const page = binding.page;
   const host = channel.URI.asciiHost.toLowerCase().replace(/\.$/, "");
+  if (channel.loadInfo.externalContentPolicyType === Ci.nsIContentPolicy.TYPE_DOCUMENT) page.mainReport = report;
   page.total++;
   if (report.state === "blocked") page.blocked++;
   if (!page.domains.has(host) && page.domains.size >= MAX_DOMAINS) {
     page.truncated = true;
-    return;
+    // Keep blocked domains selectable even if successful domains filled the list.
+    const replaceable = report.state === "blocked" &&
+      [...page.domains.values()].find(domain => !domain.blocked);
+    if (!replaceable) return;
+    page.domains.delete(replaceable.host);
+    page.recent = page.recent.filter(item => item.host !== replaceable.host);
   }
   const previous = page.domains.get(host);
   // Preserve distinct outcomes (e.g. different certificates on one CDN host).
@@ -101,7 +126,9 @@ const observer = {
   observe(subject, topic) {
     try {
       const channel = subject.QueryInterface(Ci.nsIHttpChannel);
-      if (topic === "http-on-modify-request") {
+      if (topic === "http-on-rufox-request") {
+        consumeOneShot(channel, tabFor(channel));
+      } else if (topic === "http-on-modify-request") {
         const tab = tabFor(channel);
         if (tab) bind(channel, tab);
       } else {
@@ -113,6 +140,18 @@ const observer = {
   },
 };
 export const RufoxProtection = {
+  armOneShot(browser, target, privateMode) {
+    const tab = tabs.get(browser);
+    if (!tab) throw new Error("Исходная вкладка уже закрыта.");
+    const uri = Services.io.newURI(target);
+    if (uri.scheme !== "https" || uri.userPass || !uri.asciiHost) {
+      throw new Error("Одноразовый переход доступен только для HTTPS-сайта.");
+    }
+    clearOneShot(tab);
+    tab.oneShot = { url: uri.specIgnoringRef, privateMode: Boolean(privateMode),
+      expires: Date.now() + 60000, timer: setTimeout(() => clearOneShot(tab), 60000) };
+  },
+  cancelOneShot(browser) { clearOneShot(tabs.get(browser)); },
   attach(browser) {
     if (!policyObserverStarted) {
       Services.prefs.addObserver("security.rufox.", policyObserver);
@@ -128,13 +167,14 @@ export const RufoxProtection = {
     }
   },
   detach(browser) {
+    clearOneShot(tabs.get(browser));
     tabs.delete(browser);
     if (!tabs.size && observing) {
       TOPICS.forEach(topic => Services.obs.removeObserver(observer, topic));
       observing = false;
     }
   },
-  progress(browser, progress, request, flags) {
+  progress(browser, progress, request, flags, status = 0) {
     const tab = tabs.get(browser);
     if (!tab || !request) return;
     try {
@@ -144,26 +184,33 @@ export const RufoxProtection = {
       if (!channel.URI.schemeIs("http") && !channel.URI.schemeIs("https")) {
         if (progress.isTopLevel && (flags & W.STATE_START) && (flags & W.STATE_IS_NETWORK) &&
             !/^(about:(rufox-protection|neterror|certerror)([?#]|$))/.test(channel.URI.spec)) {
+          clearOneShot(tab);
           tab.page = fresh();
         }
         return;
       }
       if (progress.isTopLevel && (flags & W.STATE_START) && (flags & W.STATE_IS_NETWORK)) {
+        if (tab.oneShot && channel.URI.specIgnoringRef !== tab.oneShot.url) clearOneShot(tab);
         tab.page = fresh();
         tab.page.url = channel.URI.spec;
         bindings.delete(channel);
       }
       if (flags & W.STATE_START) bind(channel, tab);
-      if (flags & W.STATE_STOP) collect(channel);
+      if (flags & W.STATE_STOP) {
+        collect(channel);
+        if (progress.isTopLevel && (flags & W.STATE_IS_NETWORK) && status &&
+            bindings.get(channel)?.page === tab.page && !tab.page.mainReport) tab.page.unavailable = true;
+      }
     } catch (_) { /* Requests without a channel carry no certificate report. */ }
   },
   snapshot(browser) {
     const page = tabs.get(browser)?.page;
     if (!page) return { available: false, domains: [], blocked: 0, total: 0 };
     return { available: true, url: page.url, blocked: page.blocked,
-      badge: page.blocked > 99 ? "99+" : String(page.blocked), total: page.total,
+      badge: page.blocked > 99 ? "99+" : page.blocked ? String(page.blocked) :
+        page.unavailable ? "?" : page.mainReport?.ctReason === "verified" ? "CT" : "", total: page.total,
       truncated: page.truncated,
-      state: page.blocked ? "blocked" : [...page.domains.values()].some(
+      state: page.blocked ? "blocked" : page.unavailable ? "unavailable" : [...page.domains.values()].some(
         d => d.reports.some(r => r.state === "exception")) ? "exception" :
         page.total ? "allowed" : "unobserved",
       domains: [...page.domains.values()].map(d => ({ ...d, reports: d.reports.map(r => ({ ...r })) })),

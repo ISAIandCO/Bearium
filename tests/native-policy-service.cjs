@@ -16,6 +16,9 @@ function prefBranch(values) {
   };
 }
 const Services = {
+  io: {newURI(value) {const u=new URL(value);u.hash='';return {
+    scheme:u.protocol.slice(0,-1),userPass:u.username||u.password,asciiHost:u.hostname,specIgnoringRef:u.href,
+  };}},
   prefs: { ...prefBranch(normal), getDefaultBranch: () => prefBranch(memory),
     addObserver(_prefix, observer) { preferenceObservers.push(observer); } },
   obs: {
@@ -29,7 +32,8 @@ const Services = {
 };
 const context = { Services, BrowsingContext: { get: id => contexts.get(id) },
   Ci: { nsIWebProgressListener: { STATE_START:1, STATE_STOP:2, STATE_IS_NETWORK:4 },
-    nsIHttpChannel:{}, nsIChannel:{}, nsITransportSecurityInfo:{} },
+    nsIHttpChannel:{}, nsIChannel:{}, nsITransportSecurityInfo:{},
+    nsIContentPolicy:{TYPE_DOCUMENT:6}, nsIHttpChannelInternal:{} },
   Date: class extends Date { static now() { return clock; } },
   setTimeout: (fn, delay) => { const id=++timerId; timers.set(id,{fn,at:clock+delay}); return id; },
   clearTimeout: id => timers.delete(id),
@@ -43,8 +47,10 @@ const a={}, b={};
 contexts.set(1, {top:{embedderElement:a}}); contexts.set(2, {top:{embedderElement:b}});
 service.attach(a); service.attach(b);
 function channel(id, host='example.ru', state='blocked') {
-  return {loadInfo:{browsingContextID:id}, QueryInterface(){return this;},
-    URI:{asciiHost:host,spec:`https://${host}/`,schemeIs:s=>s==='https'},
+  return {loadInfo:{browsingContextID:id, externalContentPolicyType:6,
+      originAttributes:{privateBrowsingId:0}}, QueryInterface(){return this;},
+    grants:0, grantRufoxOneShot(){this.grants++;},
+    URI:{asciiHost:host,spec:`https://${host}/`,specIgnoringRef:`https://${host}/`,schemeIs:s=>s==='https'},
     securityInfo:{QueryInterface(){return this;},rufoxPolicy:JSON.stringify({version:1,state,scts:[]})}};
 }
 function begin(browser, request) {service.progress(browser,{isTopLevel:true},request,5);}
@@ -79,6 +85,30 @@ assert(closedConnections>0,'expiry must terminate existing connections');
 memory.set('security.rufox.private_exceptions','private.ru|all');
 Services.obs.notifyObservers(null,'last-pb-context-exited');runDue();
 assert.equal(memory.get('security.rufox.private_exceptions'),'');
+// The capability applies to one exact URL in one tab, not a host-wide timer.
+function permission(request) {Services.obs.notifyObservers(request,'http-on-rufox-request');}
+service.armOneShot(a,'https://once.ru/',false);
+const wrongTab=channel(2,'once.ru');permission(wrongTab);assert.equal(wrongTab.grants,0);
+const subresource=channel(1,'once.ru');subresource.loadInfo.externalContentPolicyType=3;
+permission(subresource);assert.equal(subresource.grants,0);
+const once=channel(1,'once.ru');permission(once);assert.equal(once.grants,1);
+const again=channel(1,'once.ru');permission(again);assert.equal(again.grants,0);
+service.armOneShot(a,'https://once.ru/path?q=1',false);
+const wrongPath=channel(1,'once.ru');permission(wrongPath);assert.equal(wrongPath.grants,0);
+assert.equal(service.snapshot(a).available,true);
+service.armOneShot(a,'https://once.ru/',true);
+const wrongPrivacy=channel(1,'once.ru');permission(wrongPrivacy);assert.equal(wrongPrivacy.grants,0);
+service.armOneShot(a,'https://once.ru/',true);
+const privateOnce=channel(1,'once.ru');privateOnce.loadInfo.originAttributes.privateBrowsingId=1;
+permission(privateOnce);assert.equal(privateOnce.grants,1);
+service.armOneShot(a,'https://once.ru/',false);clock+=60_000;
+const expired=channel(1,'once.ru');permission(expired);assert.equal(expired.grants,0);
+service.armOneShot(a,'https://once.ru/',false);service.cancelOneShot(a);
+const cancelled=channel(1,'once.ru');permission(cancelled);assert.equal(cancelled.grants,0);
+assert.throws(()=>service.armOneShot(a,'https://user:password@once.ru/',false));
+assert.throws(()=>service.armOneShot(a,'http://once.ru/',false));
+assert(![...normal.values(),...memory.values()].some(v=>v.includes('once.ru')));
+service.armOneShot(a,'https://once.ru/',false);
 service.detach(a);assert.equal(service.snapshot(a).available,false);
 service.detach(b);
 console.log('Native per-tab diagnostics and expiry checks passed');

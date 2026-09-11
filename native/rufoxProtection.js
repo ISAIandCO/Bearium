@@ -66,6 +66,7 @@ function renderReport(report, parent) {
   const detail = node("details", undefined, parent);
   node("summary", report.state === "blocked" ? "Блокировка политикой УЦ" :
     report.state === "exception" ? "Применено пользовательское разрешение" : "Проверка пройдена", detail);
+  if (report.oneShot) node("p", "Применён одноразовый обход для этого перехода.", detail);
   node("p", report.zoneAllowed ? "Домен в .ru / .su / .рф." :
     report.zoneException ? "Домен вне разрешённых зон; применено исключение зоны." : "Домен вне разрешённых зон; запрос блокируется.", detail);
   node("p", (reasons[report.ctReason] || report.ctReason) + (report.ctException ? ". Применено исключение SCT." : "."), detail);
@@ -86,6 +87,7 @@ function refreshPage() {
   if (serialized === lastSnapshot) return;
   lastSnapshot = serialized;
   $("page-state").textContent = !snapshot.available ? "Состояние исходной вкладки недоступно. Можно разрешить сайт вручную." :
+    snapshot.state === "unavailable" ? "Нет результата проверки сертификата страницы. Причину общей ошибки соединения смотрите на странице ошибки." :
     snapshot.total ? `Запросов с этим УЦ: ${snapshot.total}. Заблокировано: ${snapshot.blocked}.` : "Запросов с результатом проверки этого УЦ не обнаружено.";
   if (snapshot.truncated) $("page-state").textContent += " Список ограничен 1000 доменами; счётчик продолжает учитывать запросы.";
   $("domains").replaceChildren();
@@ -114,6 +116,17 @@ $("select-blocked").addEventListener("click", event => {
 $("clear-selection").addEventListener("click", event => {
   if (!event.isTrusted) return;
   selected.clear(); updateSelection();
+});
+$("open-once").addEventListener("click", event => {
+  if (!event.isTrusted || !returnURL) return;
+  const browser = window.browsingContext.top.embedderElement;
+  try {
+    RufoxProtection.armOneShot(browser, returnURL, privateMode);
+    location.replace(returnURL);
+  } catch (error) {
+    RufoxProtection.cancelOneShot(browser);
+    $("status").textContent = error.message;
+  }
 });
 $("allow").addEventListener("click", event => {
   if (!event.isTrusted) return;
@@ -145,7 +158,7 @@ $("privacy").textContent = privateMode ? "Приватный режим: раз�
   "По умолчанию разрешение сохраняется постоянно. Срок и область можно изменить в параметрах исключения.";
 if (privateMode) {
   $("duration").value = "session";
-  $("duration").disabled = true;
+  $("duration").options[2].disabled = true;
   $("duration").options[0].textContent = "До закрытия всех приватных вкладок";
 }
 $("log-version").textContent = `Встроенный список ${RufoxLogMetadata.version}, обновлён ${RufoxLogMetadata.timestamp}. Обновляется вместе с браузером.`;
@@ -161,6 +174,7 @@ try {
       selected.add(host); updateSelection();
     }
     returnURL = uri.spec;
+    $("one-shot").hidden = false;
     $("return").href = uri.spec; $("return").hidden = false;
   }
 } catch (_) { /* Manual controls remain available without an originating URL. */ }

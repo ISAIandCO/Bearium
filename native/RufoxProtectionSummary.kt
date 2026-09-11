@@ -37,7 +37,12 @@ internal fun RufoxProtectionSummary(engine: EngineSession?, onOpen: () -> Unit) 
                             when (status.optString("state")) {
                                 "blocked" -> "Заблокировано запросов: ${status.optString("badge")}"
                                 "exception" -> "Действует пользовательское разрешение"
-                                "allowed" -> "Сертификаты прошли проверку CAnttRUst"
+                                "allowed" -> if (status.optString("badge") == "CT") {
+                                    "CT · SCT страницы проверен"
+                                } else {
+                                    "Сертификаты запросов прошли проверку CAnttRUst"
+                                }
+                                "unavailable" -> "? · Проверка сертификата страницы недоступна"
                                 "unobserved" -> "Запросов с этим УЦ не обнаружено"
                                 else -> "Состояние проверки недоступно"
                             }
