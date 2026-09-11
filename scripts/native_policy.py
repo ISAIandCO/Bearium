@@ -92,7 +92,7 @@ def verifier_h(source: str) -> str:
 
 
 def verifier_cpp(source: str) -> str:
-    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCTLogs.h"\n#include "mozilla/Preferences.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
+    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
     init = """
   // Rufox extra trust is limited to TLS servers; policy is checked below.
   mTLSServerRootInputs = mThirdPartyRootInputs.Clone();
@@ -273,6 +273,7 @@ def install(transforms):
 
 def generated_files():
     result = {Path("security/certverifier/RufoxCTLogs.h"): log_header()}
+    result[Path("security/certverifier/RufoxPolicyHelpers.h")] = (NATIVE / "RufoxPolicyHelpers.h").read_text()
     for name in ("rufoxProtection.html", "rufoxProtection.js", "rufoxProtection.css"):
         result[Path("toolkit/content") / name] = (NATIVE / name).read_text()
     return result

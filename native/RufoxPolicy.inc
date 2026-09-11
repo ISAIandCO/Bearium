@@ -27,21 +27,11 @@ Result CertVerifier::VerifyRufoxPolicy(
   const nsCString& exceptions = originAttributes.mPrivateBrowsingId
                                    ? mRufoxPrivateExceptions
                                    : mRufoxExceptions;
-  bool zoneException = false;
-  bool ctException = false;
-  for (const auto& entry : exceptions.Split(',')) {
-    nsAutoCString zone(host);
-    zone.AppendLiteral("|zone");
-    nsAutoCString ct(host);
-    ct.AppendLiteral("|ct");
-    nsAutoCString all(host);
-    all.AppendLiteral("|all");
-    zoneException |= entry.Equals(zone) || entry.Equals(all);
-    ctException |= entry.Equals(ct) || entry.Equals(all);
-  }
-  bool allowedZone = StringEndsWith(host, ".ru"_ns) ||
-                     StringEndsWith(host, ".su"_ns) ||
-                     StringEndsWith(host, ".xn--p1ai"_ns);
+  std::string_view hostView(host.get(), host.Length());
+  std::string_view exceptionsView(exceptions.get(), exceptions.Length());
+  bool zoneException = rufox::HasException(exceptionsView, hostView, "zone");
+  bool ctException = rufox::HasException(exceptionsView, hostView, "ct");
+  bool allowedZone = rufox::AllowedZone(hostView);
   if (!zoneException && !allowedZone) {
     return Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
   }

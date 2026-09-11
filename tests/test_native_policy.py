@@ -3,6 +3,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +11,15 @@ from scripts import native_policy, patch_firefox
 
 
 class NativePolicyTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('g++'), 'g++ required for native policy checks')
+    def test_actual_cpp_host_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = directory + '/policy-test'
+            subprocess.run(['g++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                            '-I', str(native_policy.NATIVE), 'tests/native-policy-hosts.cpp',
+                            '-o', binary], cwd=native_policy.ROOT, check=True)
+            subprocess.run([binary], check=True)
+
     def test_log_snapshot_is_self_consistent(self):
         data = json.loads((native_policy.NATIVE / 'ct-log-list.json').read_text())
         ids = []
