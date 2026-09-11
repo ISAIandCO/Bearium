@@ -17,100 +17,10 @@ class CertificatePatchTest(unittest.TestCase):
             "d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31",
         )
 
-    def test_name_constraints_cover_dns_and_exclude_all_ip(self) -> None:
-        constraints = patch_firefox.encoded_name_constraints()
-        self.assertTrue(constraints.startswith(b"\x30"))
-        for suffix in (b".ru", b".xn--p1ai", b".su"):
-            self.assertIn(b"\x82" + bytes((len(suffix),)) + suffix, constraints)
-        self.assertIn(b"\x87\x08" + b"\0" * 8, constraints)
-        self.assertIn(b"\x87\x20" + b"\0" * 32, constraints)
-
-    def test_generated_header_contains_auditable_policy(self) -> None:
-        header = patch_firefox.generated_header(
-            patch_firefox.load_verified_certificate()
-        )
-        self.assertIn("Permitted DNS subtrees: .ru, .xn--p1ai (.рф), .su", header)
-        self.assertIn("Excluded IP subtrees: all IPv4 and all IPv6", header)
+    def test_generated_header_contains_only_the_pinned_root(self) -> None:
+        header = patch_firefox.generated_header(patch_firefox.load_verified_certificate())
         self.assertIn("kRutheniumRussianRootDER", header)
-        self.assertIn("kRutheniumNameConstraintsDER", header)
-
-    def test_trust_domain_name_constraints_are_const_correct(self) -> None:
-        header = """  NSSCertDBTrustDomain(
-      /*out*/ nsTArray<nsTArray<uint8_t>>& builtChain,
-      /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
-      /*optional*/ const char* hostname = nullptr);
-
-  Result CheckCandidates(IssuerChecker& checker,
-                         nsTArray<IssuerCandidateWithSource>& candidates,
-                         mozilla::pkix::Input* nameConstraintsInputPtr,
-                         bool& keepGoing);
-
-  const nsTArray<mozilla::pkix::Input>&
-      mThirdPartyIntermediateInputs;                              // non-owning
-  const Maybe<nsTArray<nsTArray<uint8_t>>>& mExtraCertificates;
-"""
-        patched_header = patch_firefox.patch_trust_domain_h(header)
-        self.assertIn(
-            "const mozilla::pkix::Input* nameConstraintsInputPtr",
-            patched_header,
-        )
-        self.assertNotIn(
-            "\n                         mozilla::pkix::Input* "
-            "nameConstraintsInputPtr",
-            patched_header,
-        )
-        self.assertEqual(
-            patched_header,
-            patch_firefox.patch_trust_domain_h(patched_header),
-        )
-
-        implementation = """NSSCertDBTrustDomain::NSSCertDBTrustDomain(
-    /*out*/ nsTArray<nsTArray<uint8_t>>& builtChain,
-    /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
-    /*optional*/ const char* hostname)
-    : mDummy(dummy),
-      mThirdPartyIntermediateInputs(thirdPartyIntermediateInputs),
-      mExtraCertificates(extraCertificates),
-      mBuiltChain(builtChain) {}
-
-Result NSSCertDBTrustDomain::CheckCandidates(
-    IssuerChecker& checker, nsTArray<IssuerCandidateWithSource>& candidates,
-    Input* nameConstraintsInputPtr, bool& keepGoing) {
-  return checker.Check(candidates[0].mDER, nameConstraintsInputPtr, keepGoing);
-}
-
-Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
-                                        IssuerChecker& checker, Time) {
-  Input* nameConstraintsInputPtr = nullptr;
-  if (false) {
-    return Success;
-  } else if (PR_GetError() != SEC_ERROR_EXTENSION_NOT_FOUND) {
-    return Result::FATAL_ERROR_LIBRARY_FAILURE;
-  }
-
-  // First try all relevant certificates known to Gecko
-  return Success;
-}
-"""
-        patched_implementation = patch_firefox.patch_trust_domain_cpp(
-            implementation
-        )
-        self.assertEqual(
-            patched_implementation.count(
-                "const Input* nameConstraintsInputPtr"
-            ),
-            2,
-        )
-        self.assertNotIn(
-            "\n    Input* nameConstraintsInputPtr", patched_implementation
-        )
-        self.assertNotIn(
-            "\n  Input* nameConstraintsInputPtr", patched_implementation
-        )
-        self.assertEqual(
-            patched_implementation,
-            patch_firefox.patch_trust_domain_cpp(patched_implementation),
-        )
+        self.assertNotIn("kRutheniumNameConstraintsDER", header)
 
     def test_product_patches_are_idempotent(self) -> None:
         strings = """<resources xmlns:tools="http://schemas.android.com/tools">

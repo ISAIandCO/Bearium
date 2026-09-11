@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src chrome:; style-src chrome:; form-action 'none'; base-uri 'none'">
+<title>Защита сертификатов Rufox</title>
+<link rel="stylesheet" href="chrome://global/content/rufoxProtection.css">
+<script src="chrome://global/content/rufoxProtection.js" defer></script>
+<main>
+<h1>Защита сертификатов</h1>
+<p>Rufox ограничивает использование Russian Trusted Root CA российскими доменными зонами и проверяет SCT — подписи журналов прозрачности сертификатов.</p>
+<p>Если эта защита мешает открыть сайт, вы можете разрешить его. Проверка имени, срока действия, подписи и отзыва сертификата продолжит работать.</p>
+<p id="privacy"></p>
+<label for="hosts">Сайты для исключения — по одному в строке</label>
+<textarea id="hosts" rows="4" spellcheck="false" autocomplete="off" placeholder="example.ru"></textarea>
+<label for="scope">Что разрешить</label>
+<select id="scope">
+<option value="all">Использование этого УЦ без ограничений зоны и SCT</option>
+<option value="zone">Только домен вне .ru / .su / .рф — SCT проверять</option>
+<option value="ct">Только отсутствие подходящего SCT — зону проверять</option>
+</select>
+<p>Исключение действует для точного имени сайта и только для этого УЦ. Поддомены автоматически не разрешаются.</p>
+<button id="allow">Разрешить постоянно</button>
+<p id="status" role="status" aria-live="polite"></p>
+<a id="return" hidden>Вернуться на сайт</a>
+<h2>Сохранённые исключения</h2>
+<ul id="exceptions"></ul>
+<p>При изменении исключений активные сетевые соединения закрываются. Незавершённые загрузки могут прерваться; страницу нужно открыть повторно.</p>
+</main>
+</html>
