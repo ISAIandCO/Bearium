@@ -1,11 +1,6 @@
 name: Build and release Rufox for Android
 
 on:
-  pull_request:
-    paths:
-      - 'native/**'
-      - 'scripts/native_policy.py'
-      - 'scripts/patch_firefox.py'
   workflow_dispatch:
   schedule:
     # GitHub cron uses UTC. Check on five fixed dates each month. A release that
@@ -68,7 +63,7 @@ jobs:
     # Scheduled checks skip versions that are already published. A manual run
     # intentionally rebuilds the current version so broken release assets can
     # be replaced after a CI fix.
-    if: needs.resolve.outputs.release_exists != 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    if: needs.resolve.outputs.release_exists != 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

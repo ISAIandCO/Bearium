@@ -19,8 +19,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("workflow_dispatch:", trigger_section)
         self.assertIn("schedule:", trigger_section)
         self.assertNotIn("push:", trigger_section)
-        self.assertIn("pull_request:", trigger_section)
-        self.assertIn("'native/**'", trigger_section)
+        self.assertNotIn("pull_request:", trigger_section)
         publish = self.workflow.split("  publish:", 1)[1]
         self.assertIn("github.event_name != 'pull_request'", publish)
         self.assertIn("github.ref == 'refs/heads/main'", publish)
