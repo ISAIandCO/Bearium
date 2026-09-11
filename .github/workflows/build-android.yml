@@ -8,11 +8,11 @@ on:
     - cron: "0 23 * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: ruthenium-firefox-stable-android
-  cancel-in-progress: false
+  group: ruthenium-firefox-stable-android-${{ github.event.pull_request.number || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   resolve:
@@ -307,7 +307,9 @@ jobs:
   publish:
     name: Verify and publish Rufox ${{ needs.resolve.outputs.version }}
     needs: [resolve, build]
-    if: ${{ always() && needs.resolve.result == 'success' && needs.build.result == 'success' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.resolve.result == 'success' && needs.build.result == 'success' }}
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -363,7 +365,7 @@ jobs:
           Gecko native libraries: independently built and verified for every ABI
           Signing: public repository Android debug key
           Signing certificate SHA-256: $RFIREFOX_DEBUG_CERT_SHA256
-          Scoped CA DNS names: .ru,.xn--p1ai,.su
+          Protected CA policy: .ru,.xn--p1ai,.su plus Yandex SCT; user exceptions supported
           IP subjectAltName values: rejected
           Ministry CA DER SHA-256: d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31
           EOF
@@ -378,7 +380,7 @@ jobs:
             echo "- ABIs: arm64-v8a, armeabi-v7a, x86_64"
             echo "- Gecko native libraries are independently built and verified for every ABI"
             echo "- Public debug signer SHA-256: $RFIREFOX_DEBUG_CERT_SHA256"
-            echo "- Added CA scope: DNS names under .ru, .xn--p1ai and .su; IP SANs are rejected"
+            echo "- Protected CA policy: .ru/.su/.рф and Yandex SCT by default; user-controlled exceptions"
             echo
             echo "Warning: the debug private key is public and does not authenticate the publisher."
             echo

@@ -14,6 +14,11 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+try:
+    from . import native_policy
+except ImportError:
+    import native_policy
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CERTIFICATE_PATH = REPOSITORY_ROOT / "certificates/russian_trusted_root_ca.pem"
@@ -78,8 +83,6 @@ FENIX_ADAPTIVE_ICONS = (
 TEXT_TARGETS = (
     CERT_VERIFIER_CPP,
     CERT_VERIFIER_H,
-    TRUST_DOMAIN_CPP,
-    TRUST_DOMAIN_H,
     FENIX_GRADLE,
     FENIX_STRINGS,
     FENIX_RELEASE_STRINGS,
@@ -138,26 +141,6 @@ def load_verified_certificate(
     return der
 
 
-def encoded_name_constraints() -> bytes:
-    """Return RFC 5280 constraints for .ru/.xn--p1ai/.su and no IP SANs."""
-
-    def tlv(tag: int, content: bytes) -> bytes:
-        if len(content) >= 128:
-            raise ValueError("constraint element is unexpectedly large")
-        return bytes((tag, len(content))) + content
-
-    def subtree(general_name_tag: int, value: bytes) -> bytes:
-        return tlv(0x30, tlv(general_name_tag, value))
-
-    permitted = b"".join(
-        subtree(0x82, suffix) for suffix in (b".ru", b".xn--p1ai", b".su")
-    )
-    # RFC 5280 encodes an IP constraint as address || mask. An all-zero mask
-    # covers the entire address family, so excluding it rejects every IP SAN.
-    excluded = subtree(0x87, b"\0" * 8) + subtree(0x87, b"\0" * 32)
-    return tlv(0x30, tlv(0xA0, permitted) + tlv(0xA1, excluded))
-
-
 def format_cpp_array(name: str, data: bytes) -> str:
     lines = []
     for offset in range(0, len(data), 12):
@@ -180,10 +163,6 @@ def generated_header(der: bytes) -> str:
 // Russian Trusted Root CA, DER SHA-256: {digest}
 {format_cpp_array("kRutheniumRussianRootDER", der)}
 
-// Permitted DNS subtrees: .ru, .xn--p1ai (.рф), .su.
-// Excluded IP subtrees: all IPv4 and all IPv6 addresses.
-{format_cpp_array("kRutheniumNameConstraintsDER", encoded_name_constraints())}
-
 #endif  // security_certverifier_RutheniumRoot_h
 """
 
@@ -195,201 +174,6 @@ def replace_once(source: str, old: str, new: str, description: str) -> str:
     if count != 1:
         raise ValueError(f"{description}: expected one anchor, found {count}")
     return source.replace(old, new, 1)
-
-
-def patch_cert_verifier_h(source: str) -> str:
-    old = """  nsTArray<mozilla::pkix::Input> mThirdPartyIntermediateInputs;
-
-  // We only have a forward declarations of these classes (see above)"""
-    new = f"""  nsTArray<mozilla::pkix::Input> mThirdPartyIntermediateInputs;
-
-  {BEGIN_MARKER}
-  // Only TLSServer verification receives this extra root. The additional
-  // RFC 5280 constraints are supplied while the path is built.
-  nsTArray<mozilla::pkix::Input> mTLSServerRootInputs;
-  mozilla::pkix::Input mRutheniumRootInput;
-  mozilla::pkix::Input mRutheniumNameConstraintsInput;
-  bool mRutheniumScopedTrustInitialized = false;
-  {END_MARKER}
-
-  // We only have a forward declarations of these classes (see above)"""
-    return replace_once(source, old, new, "CertVerifier members")
-
-
-def patch_cert_verifier_cpp(source: str) -> str:
-    source = replace_once(
-        source,
-        '#include "CertVerifier.h"\n',
-        '#include "CertVerifier.h"\n\n#include "RutheniumRoot.h"\n',
-        "Ruthenium header include",
-    )
-
-    destructor = "\nCertVerifier::~CertVerifier() = default;"
-    position = source.find(destructor)
-    if position == -1:
-        raise ValueError("CertVerifier destructor anchor was not found")
-    constructor_close = source.rfind("\n}", 0, position)
-    if constructor_close == -1:
-        raise ValueError("CertVerifier constructor end was not found")
-    init_block = f"""
-
-  {BEGIN_MARKER}
-  mTLSServerRootInputs = mThirdPartyRootInputs.Clone();
-  if (mRutheniumRootInput.Init(kRutheniumRussianRootDER,
-                                sizeof(kRutheniumRussianRootDER)) == Success &&
-      mRutheniumNameConstraintsInput.Init(
-          kRutheniumNameConstraintsDER,
-          sizeof(kRutheniumNameConstraintsDER)) == Success) {{
-    mTLSServerRootInputs.AppendElement(mRutheniumRootInput);
-    mRutheniumScopedTrustInitialized = true;
-  }}
-  {END_MARKER}"""
-    if BEGIN_MARKER not in source[:position]:
-        source = source[:constructor_close] + init_block + source[constructor_close:]
-
-    start = source.find("    case VerifyUsage::TLSServer: {")
-    end = source.find("    case VerifyUsage::EmailCA:", start)
-    if start == -1 or end == -1:
-        raise ValueError("TLSServer verification section was not found")
-    section = source[start:end]
-    if "mTLSServerRootInputs" not in section:
-        count = section.count("originAttributes, mThirdPartyRootInputs,")
-        if count != 2:
-            raise ValueError(f"expected two TLSServer root arguments, found {count}")
-        section = section.replace(
-            "originAttributes, mThirdPartyRootInputs,",
-            "originAttributes, mTLSServerRootInputs,",
-        )
-
-        old_tail = "mCTVerifier, builtChain, pinningTelemetryInfo, hostname);"
-        count = section.count(old_tail)
-        if count != 2:
-            raise ValueError(f"expected two TLSServer constructor tails, found {count}")
-        new_tail = """mCTVerifier, builtChain, pinningTelemetryInfo, hostname,
-            mRutheniumScopedTrustInitialized ? &mRutheniumRootInput : nullptr,
-            mRutheniumScopedTrustInitialized
-                ? &mRutheniumNameConstraintsInput
-                : nullptr);"""
-        section = section.replace(old_tail, new_tail)
-        source = source[:start] + section + source[end:]
-    return source
-
-
-def patch_trust_domain_h(source: str) -> str:
-    old_signature = """      /*out*/ nsTArray<nsTArray<uint8_t>>& builtChain,
-      /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
-      /*optional*/ const char* hostname = nullptr);"""
-    new_signature = """      /*out*/ nsTArray<nsTArray<uint8_t>>& builtChain,
-      /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo = nullptr,
-      /*optional*/ const char* hostname = nullptr,
-      /*optional*/ const mozilla::pkix::Input* constrainedRoot = nullptr,
-      /*optional*/ const mozilla::pkix::Input* additionalNameConstraints =
-          nullptr);"""
-    source = replace_once(
-        source, old_signature, new_signature, "TrustDomain constructor declaration"
-    )
-
-    old_check_candidates = """  Result CheckCandidates(IssuerChecker& checker,
-                         nsTArray<IssuerCandidateWithSource>& candidates,
-                         mozilla::pkix::Input* nameConstraintsInputPtr,
-                         bool& keepGoing);"""
-    new_check_candidates = """  Result CheckCandidates(IssuerChecker& checker,
-                         nsTArray<IssuerCandidateWithSource>& candidates,
-                         const mozilla::pkix::Input* nameConstraintsInputPtr,
-                         bool& keepGoing);"""
-    source = replace_once(
-        source,
-        old_check_candidates,
-        new_check_candidates,
-        "CheckCandidates name constraints constness",
-    )
-
-    old_members = """  const nsTArray<mozilla::pkix::Input>&
-      mThirdPartyIntermediateInputs;                              // non-owning
-  const Maybe<nsTArray<nsTArray<uint8_t>>>& mExtraCertificates;"""
-    new_members = f"""  const nsTArray<mozilla::pkix::Input>&
-      mThirdPartyIntermediateInputs;                              // non-owning
-  {BEGIN_MARKER}
-  const mozilla::pkix::Input* mConstrainedRoot;              // non-owning
-  const mozilla::pkix::Input* mAdditionalNameConstraints;    // non-owning
-  {END_MARKER}
-  const Maybe<nsTArray<nsTArray<uint8_t>>>& mExtraCertificates;"""
-    return replace_once(source, old_members, new_members, "TrustDomain members")
-
-
-def patch_trust_domain_cpp(source: str) -> str:
-    old_signature = """    /*out*/ nsTArray<nsTArray<uint8_t>>& builtChain,
-    /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
-    /*optional*/ const char* hostname)"""
-    new_signature = """    /*out*/ nsTArray<nsTArray<uint8_t>>& builtChain,
-    /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
-    /*optional*/ const char* hostname,
-    /*optional*/ const Input* constrainedRoot,
-    /*optional*/ const Input* additionalNameConstraints)"""
-    source = replace_once(
-        source, old_signature, new_signature, "TrustDomain constructor definition"
-    )
-    source = replace_once(
-        source,
-        """      mThirdPartyIntermediateInputs(thirdPartyIntermediateInputs),
-      mExtraCertificates(extraCertificates),""",
-        """      mThirdPartyIntermediateInputs(thirdPartyIntermediateInputs),
-      mConstrainedRoot(constrainedRoot),
-      mAdditionalNameConstraints(additionalNameConstraints),
-      mExtraCertificates(extraCertificates),""",
-        "TrustDomain constructor initialization",
-    )
-
-    old_check_candidates = """Result NSSCertDBTrustDomain::CheckCandidates(
-    IssuerChecker& checker, nsTArray<IssuerCandidateWithSource>& candidates,
-    Input* nameConstraintsInputPtr, bool& keepGoing) {"""
-    new_check_candidates = """Result NSSCertDBTrustDomain::CheckCandidates(
-    IssuerChecker& checker, nsTArray<IssuerCandidateWithSource>& candidates,
-    const Input* nameConstraintsInputPtr, bool& keepGoing) {"""
-    source = replace_once(
-        source,
-        old_check_candidates,
-        new_check_candidates,
-        "CheckCandidates definition name constraints constness",
-    )
-
-    old_pointer = "  Input* nameConstraintsInputPtr = nullptr;"
-    source = replace_once(
-        source,
-        old_pointer,
-        "  const Input* nameConstraintsInputPtr = nullptr;",
-        "name constraints pointer constness",
-    )
-    anchor = """  } else if (PR_GetError() != SEC_ERROR_EXTENSION_NOT_FOUND) {
-    return Result::FATAL_ERROR_LIBRARY_FAILURE;
-  }
-
-  // First try all relevant certificates known to Gecko"""
-    block = f"""  }} else if (PR_GetError() != SEC_ERROR_EXTENSION_NOT_FOUND) {{
-    return Result::FATAL_ERROR_LIBRARY_FAILURE;
-  }}
-
-  {BEGIN_MARKER}
-  if (mConstrainedRoot && mAdditionalNameConstraints) {{
-    BackCert constrainedRoot(*mConstrainedRoot, EndEntityOrCA::MustBeCA,
-                             nullptr);
-    Result rv = constrainedRoot.Init();
-    if (rv != Success) {{
-      return rv;
-    }}
-    if (InputsAreEqual(encodedIssuerName, constrainedRoot.GetSubject())) {{
-      // Two independent constraint sets would have to be intersected. Fail
-      // closed if NSS ever adds imposed constraints for this same subject.
-      if (nameConstraintsInputPtr) {{
-        return Result::ERROR_UNKNOWN_ISSUER;
-      }}
-      nameConstraintsInputPtr = mAdditionalNameConstraints;
-    }}
-  }}
-  {END_MARKER}
-
-  // First try all relevant certificates known to Gecko"""
-    return replace_once(source, anchor, block, "scoped root name constraints")
 
 
 def patch_fenix_gradle(source: str) -> str:
@@ -524,10 +308,6 @@ def patch_fenix_adaptive_icon(source: str) -> str:
 
 
 TRANSFORMS: dict[Path, Callable[[str], str]] = {
-    CERT_VERIFIER_CPP: patch_cert_verifier_cpp,
-    CERT_VERIFIER_H: patch_cert_verifier_h,
-    TRUST_DOMAIN_CPP: patch_trust_domain_cpp,
-    TRUST_DOMAIN_H: patch_trust_domain_h,
     FENIX_GRADLE: patch_fenix_gradle,
     FENIX_STRINGS: patch_fenix_strings,
     FENIX_RELEASE_STRINGS: patch_fenix_release_strings,
@@ -536,6 +316,8 @@ TRANSFORMS: dict[Path, Callable[[str], str]] = {
     FENIX_ADAPTIVE_ICON: patch_fenix_adaptive_icon,
     FENIX_ADAPTIVE_ROUND_ICON: patch_fenix_adaptive_icon,
 }
+
+native_policy.install(TRANSFORMS)
 
 
 def patch_checkout(source_root: Path, der: bytes) -> list[Path]:
@@ -553,6 +335,12 @@ def patch_checkout(source_root: Path, der: bytes) -> list[Path]:
         header_path.write_text(header, encoding="utf-8")
         changed.append(GENERATED_HEADER)
     changed.extend(copy_branding_icons(source_root))
+    for relative_path, content in native_policy.generated_files().items():
+        destination = source_root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists() or destination.read_text() != content:
+            destination.write_text(content, encoding="utf-8")
+            changed.append(relative_path)
     return changed
 
 
@@ -590,6 +378,7 @@ def fetch_text(url: str) -> str:
 
 
 def check_remote(raw_base_url: str, der: bytes) -> None:
+    native_policy.generated_files()  # Validate pinned log keys and intervals too.
     for relative_path, transform in TRANSFORMS.items():
         source = fetch_text(f"{raw_base_url.rstrip('/')}/{relative_path.as_posix()}")
         patched = transform(source)
@@ -615,10 +404,11 @@ def main() -> None:
 
     if args.list_targets:
         for path in (
-            *TEXT_TARGETS,
+            *TRANSFORMS,
             *(path for _, path in FENIX_LEGACY_ICONS),
             *(path for _, path in FENIX_ADAPTIVE_ICONS),
             GENERATED_HEADER,
+            *native_policy.generated_files(),
         ):
             print(path)
         return
