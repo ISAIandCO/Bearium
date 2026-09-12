@@ -1,0 +1,2 @@
+# Google's maintained service-account authentication; upload logic uses its session.
+google-auth[requests]==2.48.0

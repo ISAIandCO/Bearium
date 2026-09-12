@@ -104,7 +104,7 @@ def main():
         badging=run(tool('aapt2'),'dump','badging',str(temp/'universal.apk'))
         if "application-label:'Bearium'" not in badging: raise ValueError('Incorrect launcher label')
         run(tool('zipalign'),'-c','-P','16','-v','4',str(temp/'universal.apk'))
-        report={'package':'app.bearium.browser','versionCode':a.version_code,'versionName':a.version_name,'uploadCertificateSha256':expected,'abis':sorted(ABIS),'nativeLibraries':len(names),'static16KBChecks':'passed','deviceTesting':'required'}
+        report={'aabSha256':hashlib.sha256(a.aab.read_bytes()).hexdigest(),'package':'app.bearium.browser','versionCode':a.version_code,'versionName':a.version_name,'uploadCertificateSha256':expected,'abis':sorted(ABIS),'nativeLibraries':len(names),'static16KBChecks':'passed','deviceTesting':'required'}
         a.aab.with_suffix('.validation.json').write_text(json.dumps(report,indent=2)+'\n')
         a.aab.with_suffix('.manifest.xml').write_text(manifest)
         print(json.dumps(report,indent=2))

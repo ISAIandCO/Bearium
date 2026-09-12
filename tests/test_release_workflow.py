@@ -24,7 +24,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", publish)
         self.assertIn("github.ref == 'refs/heads/main'", publish)
 
-    def test_release_uses_committed_debug_key_and_debug_version_suffix(self) -> None:
+    def test_release_uses_private_key_and_plain_version_tag(self) -> None:
         self.assertNotIn("-PdisableDebugSigning", self.workflow)
         self.assertNotIn('"$apksigner" sign', self.workflow)
         self.assertIn('"$apksigner" verify', self.workflow)
@@ -37,7 +37,10 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
             "d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f",
             self.workflow,
         )
-        self.assertIn('release_tag="${FIREFOX_VERSION}_debug"', self.workflow)
+        self.assertIn('release_tag="${FIREFOX_VERSION}"', self.workflow)
+        self.assertIn('BEARIUM_PRODUCTION: "1"', self.workflow)
+        self.assertIn("prepare_play_signing.py", self.workflow)
+        self.assertIn("environment: release-signing", self.workflow)
         self.assertIn('--title "$RELEASE_TAG"', self.workflow)
         self.assertIn('gh release create "$RELEASE_TAG"', self.workflow)
 
@@ -133,7 +136,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("release_ready=true", self.workflow)
         self.assertIn(
             "for asset in artifacts/*.apk artifacts/*.apk.sha256 "
-            "artifacts/build-info.txt",
+            "artifacts/*.certificate.txt artifacts/build-info.txt",
             self.workflow,
         )
         self.assertIn(

@@ -1,150 +1,213 @@
-# Bearium: Google Play и вход на сайты по биометрии
+# Bearium: GitHub APK, Google Play и биометрия на сайтах
 
 Проверено по документации Google и Mozilla 12 сентября 2026 года.
-Репозиторий: https://github.com/ISAIandCO/Bearium
+Репозиторий: https://github.com/ISAIandCO/Bearium.
+PR #19 включает исправление падения страницы CAnttRUst из PR #18.
 
-## Что подготовлено в коде
+## Что подготовлено
 
-| Вариант | Пакет | Подпись | Назначение |
+| Канал | Пакет | Подпись | Автоматизация |
 |---|---|---|---|
-| Google Play | `app.bearium.browser` | Закрытый upload key для AAB; Play app signing key для установки | Production и Play testing |
-| GitHub development | `app.bearium.browser.dev` | Старый публичный debug key | Тестирование, не Google Play |
-| Старый Rufox | `app.ruthenium.firefox` | Старый публичный debug key | Отдельная прежняя установка |
+| GitHub Releases | `app.bearium.browser` | Закрытый app-signing key владельца | Ежедневная проверка новой стабильной версии Mozilla, затем три APK |
+| Google Play | `app.bearium.browser` | Тот же app-signing key, импортированный в Play | AAB после GitHub-выпуска; опциональная отправка в выбранный track |
+| Локальная development-сборка | `app.bearium.browser.dev` | Публичный debug key | Не является production-релизом |
+| Старый Rufox | `app.ruthenium.firefox` | Публичный debug key | Отдельная прежняя установка |
 
-Имя приложения — Bearium. Deep link scheme — `bearium`. Java/Kotlin namespace
-`org.mozilla.fenix` и внутренние имена CA-политики сохранены: они являются
-частью кода, а не идентификатором устанавливаемого приложения. Общий Android UID
-удалён: production и dev не должны делить UID при разных подписях.
+Основное имя — Bearium; deep link scheme — `bearium`; sharedUserId удалён.
+Java/Kotlin namespace `org.mozilla.fenix` и внутренние имена CA-политики остаются
+техническими именами кода. Векторные foreground/background и monochrome
+нарисованы самостоятельно по мотивам концепта медведя с пламенем.
 
-Новая векторная иконка содержит медведя и пламя, отдельные foreground/background,
-монохромный VectorDrawable и SVG. Заменены launcher, splash и основные логотипы
-приложения. Авторские и лицензионные уведомления Mozilla сохранены.
+GitHub остаётся самостоятельным каналом: ему не нужны аккаунт Play, service
+account, одобрение магазина или доступ Google к passkeys. Нужен только закрытый
+ключ подписи. Ошибка Play не отменяет и не задерживает опубликованные APK.
 
-В сборке выключены Fenix `TELEMETRY` и `CRASH_REPORTING`. Это не утверждение
-«браузер вообще никуда не обращается»: сайты, поиск, обновления расширений,
-Safe Browsing, удалённые настройки и включаемая пользователем синхронизация
-требуют отдельного учёта в декларации данных.
+## 1. Решить вопрос взаимозаменяемости до регистрации ключа в Play
 
-`Build Bearium for Google Play` сначала собирает проверенные APK трёх ABI из
-одной ревизии с одним `MOZ_BUILD_DATE`. Затем отдельно собирает arm64 Gecko и
-AAB, добавляя только недостающие Gecko-библиотеки двух других архитектур из
-APK этого же запуска. Сторонние библиотеки включаются штатными зависимостями
-Gradle. Это четыре компиляции Gecko, три из них параллельные; сборка затратная.
-Подмена движка готовым официальным AAR не используется: CA-патчи сохраняются.
+Для обновления без удаления приложения нужны совпадающие package и допустимая
+Android цепочка сертификатов, а также подходящий versionCode. Одна версия
+Firefox или одинаковое имя файла этого не обеспечивают.
 
-Проверки AAB: сертификат и целостность подписи, package, версия, target SDK,
-отсутствие debuggable/testOnly, комплектность Gecko для arm64/armv7/x86_64,
-ELF-архитектура, 16 КБ PT_LOAD для 64-битных библиотек, bundletool validation,
-16 КБ ZIP alignment и имя приложения в временном APK. Этот APK предназначен
-только для проверки; он не публикуется. Результат — `Bearium.aab` и отчёты.
+**Предлагаемая схема:** создать собственный app-signing key, подписывать им
+GitHub APK и импортировать этот же ключ в Play App Signing. Для AAB желательно
+создать отдельный upload key. Он удостоверяет загрузку в магазин, но не подпись
+установленного приложения. Если отдельный upload key пока не настроен, workflow
+умеет использовать app-signing key также для загрузки AAB.
 
-## 1. Подготовить аккаунт и окончательную identity
+| Выбор | Последствие |
+|---|---|
+| Свой app-signing key в GitHub и импорт того же ключа в Play | Возможны обновления между каналами без удаления, при совместимых версиях |
+| Google генерирует свой app-signing key, GitHub подписывает другим | Эти установки с одним package не обновляют друг друга |
+| Разные package у каналов | Устанавливаются рядом, данные раздельные |
 
-1. Создать или открыть [Google Play Console](https://play.google.com/console/).
-2. Выбрать корректный тип аккаунта, пройти предложенную Google проверку
-   личности/организации и устройства. Указывать реальные данные и страну;
-   доступность регистрации и платежей проверять в своей консоли.
-3. Создать приложение **Bearium**, тип «Приложение», категорию «Связь» либо
-   другую подходящую категорию браузера, выбрать основной язык и бесплатность.
-4. До первой загрузки зафиксировать пакет `app.bearium.browser`: после
-   публикации заменить package существующего приложения нельзя.
-5. Выбрать **Play App Signing → ключ подписи генерирует Google**.
-   Ни публичный debug key, ни его копия не подходят для production.
+APK из Play может состоять из splits, а GitHub APK — быть одним файлом.
+Побайтовое совпадение не требуется. Но обновление с Play splits на standalone
+APK и обратно нужно проверить на устройствах. Более старую версию Android
+может не разрешить установить поверх новой. При ротации app-signing key
+совместимость требует отдельной работы с signing lineage и версиями Android;
+не включать автоматическую смену ключа без такой проверки.
 
-Это новое приложение: Android не перенесёт автоматически историю, пароли,
-закладки и исключения из Rufox. До удаления старой установки перенести
-доступные данные штатным экспортом/синхронизацией. Dev и production могут
-стоять рядом; их данные изолированы.
+Старый Rufox автоматически в Bearium не превратится. До удаления прежней
+установки перенести доступные данные штатным экспортом/синхронизацией.
+[Официальная документация Android о подписи](https://developer.android.com/studio/publish/app-signing).
 
-## 2. Создать upload key у себя
+## 2. Создать ключи и настроить GitHub
 
-Нужен JDK с `keytool`. Команды ниже подходят для PowerShell; пароли вводятся
-интерактивно и не попадают в историю команды.
+Команды для PowerShell; нужен JDK с `keytool`. Пароли вводятся интерактивно.
 
 ```powershell
-keytool -genkeypair -v -keystore bearium-upload.jks -storetype JKS -alias bearium-upload -keyalg RSA -keysize 3072 -validity 10000
-keytool -list -v -keystore bearium-upload.jks -alias bearium-upload
-keytool -exportcert -rfc -keystore bearium-upload.jks -alias bearium-upload -file bearium-upload-certificate.pem
+keytool -genkeypair -v -keystore bearium-app-signing.jks -storetype JKS -alias bearium -keyalg RSA -keysize 3072 -validity 10000
+keytool -list -v -keystore bearium-app-signing.jks -alias bearium
+keytool -exportcert -rfc -keystore bearium-app-signing.jks -alias bearium -file bearium-app-signing-certificate.pem
 ```
 
-1. Задать сильные пароли хранилища и ключа. Сохранить их в менеджере паролей.
-2. Скопировать SHA-256 из второй команды. Это **upload certificate**, не
-   будущий сертификат установленного из Play приложения.
-3. Сделать две защищённые резервные копии `.jks` и паролей вне репозитория.
-4. Получить Base64 для GitHub Secret:
+Сохранить `.jks` и пароли в двух защищённых резервных копиях вне GitHub.
+Скопировать SHA-256 из второй команды. Публичный `.pem` допустимо передать
+Google; приватный `.jks`, его Base64 и пароли не коммитить и не класть в release.
+
+В **Settings → Environments** создать `release-signing`, разрешить deployment
+только из доверенной ветки `main`. В окружение добавить:
+
+| Тип | Имя | Значение |
+|---|---|---|
+| Secret | `BEARIUM_KEYSTORE_BASE64` | Base64 нового app-signing keystore |
+| Secret | `BEARIUM_STORE_PASSWORD` | Пароль хранилища |
+| Secret | `BEARIUM_KEY_ALIAS` | `bearium` |
+| Secret | `BEARIUM_KEY_PASSWORD` | Пароль ключа |
+| Variable | `BEARIUM_SIGNING_CERT_SHA256` | SHA-256 app-signing certificate, с двоеточиями или без |
+
+Получить Base64 в буфер обмена и после вставки очистить его:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path .\bearium-upload.jks))) | Set-Clipboard
-```
-
-Base64 — тот же секретный ключ, а не шифрование. После вставки очистить буфер:
-
-```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path .\bearium-app-signing.jks))) | Set-Clipboard
+# После вставки в GitHub Secret:
 Set-Clipboard -Value ''
 ```
 
-`.pem` с публичным сертификатом допустимо передать Google. `.jks`, пароли и
-Base64 нельзя коммитить, отправлять в issue или прикладывать к релизу.
+Base64 не является шифрованием. Production-сборка прекращается при отсутствующем
+секрете, неверном SHA-256 или известном публичном debug certificate. Ключ
+распаковывается временно с правами 0600 и удаляется после шага подписания.
+Публичный debug keystore остаётся только для конфигурации upstream и локальных
+dev-сборок; production artifact обязан пройти проверку закрытого сертификата.
 
-[Разница между upload key и app signing key](https://developer.android.com/studio/publish/app-signing).
+Для отдельного upload key повторить команды с `bearium-upload.jks` и alias
+`bearium-upload`. В **том же** окружении добавить все четыре secrets:
+`BEARIUM_UPLOAD_KEYSTORE_BASE64`, `BEARIUM_UPLOAD_STORE_PASSWORD`,
+`BEARIUM_UPLOAD_KEY_ALIAS`, `BEARIUM_UPLOAD_KEY_PASSWORD`, и variable
+`BEARIUM_UPLOAD_CERT_SHA256`. Не задавать только часть этого набора.
 
-## 3. Настроить GitHub
+## 3. Запустить GitHub APK и впервые загрузить Play
 
-В **Bearium → Settings → Environments** создать окружение `google-play`.
-Ограничить deployment branches доверенной веткой `main`. Это окружение
-выбирает финальный job; произвольной ветке не следует выдавать signing secrets.
+1. Слить PR #19. Он уже включает код исправления #18; отдельное повторное
+   применение патча не нужно. PR #18 можно слить первым либо закрыть как
+   включённый после принятия #19 — сам workflow PR не сливает.
+2. Открыть **Actions → Build and release Bearium for Android → Run workflow**, `main`.
+3. Дождаться трёх APK и GitHub Release с тегом версии Firefox, без `_debug`.
+4. Скачать нужный APK, проверить SHA-256 и сертификат из соседнего отчёта.
+5. Сохранить числовой ID workflow run из URL `actions/runs/…`.
+6. Открыть **Build Bearium for Google Play → Run workflow**, указать этот ID
+   в `build_run_id`, оставить `publish=false`.
+7. Скачать artifact `Bearium-play-<versionCode>`: AAB, manifest, SHA-256,
+   JSON-отчёт и сведения об исходниках.
+8. В [Play Console](https://play.google.com/console/) создать приложение Bearium,
+   пройти проверку аккаунта и заполнить сведения о реальном издателе.
+9. При настройке **Play App Signing** выбрать использование/экспорт **существующего
+   ключа**. Не выбирать генерацию нового Google key, если нужна взаимозаменяемость.
+10. Скачать из консоли PEPK и предоставленный Google encryption key. Выполнить
+    точную команду, показанную консолью, указав `bearium-app-signing.jks` и alias
+    `bearium`; загрузить зашифрованный результат. Обычный `.jks` не публиковать.
+11. Проверить совпадение SHA-256 **App signing key certificate** в Play с
+    `BEARIUM_SIGNING_CERT_SHA256`. Если используется отдельный upload key,
+    зарегистрировать его публичный сертификат по запросу консоли.
+12. Загрузить AAB в **Testing → Internal testing**, добавить release notes
+    и тестировщиков, открыть opt-in ссылку и установить приложение из Play.
+13. Проверить сертификат установленного APK и обновление между каналами на
+    тестовом устройстве. Internal app sharing для этой проверки не подходит:
+    его сертификат может отличаться от app-signing certificate.
 
-В нём создать **Environment secrets**:
+`versionCode` формируется автоматически из `github.run_number` APK workflow.
+APK всех ABI и AAB используют одно число; `versionName` остаётся версией Firefox.
+Не назначать независимые коды вручную в другом pipeline и не удалять/создавать
+заново APK workflow со сбросом счётчика. Каждый новый ручной запуск APK workflow
+увеличивает код; rerun существующего запуска сохраняет его. Для исправления уже
+опубликованной версии запускать новый workflow, а не менять бинарник под прежним кодом.
 
-| Имя | Значение |
-|---|---|
-| `BEARIUM_KEYSTORE_BASE64` | Base64 содержимого нового `.jks`, без переносов |
-| `BEARIUM_STORE_PASSWORD` | Пароль хранилища |
-| `BEARIUM_KEY_ALIAS` | `bearium-upload` |
-| `BEARIUM_KEY_PASSWORD` | Пароль ключа |
+AAB берёт **тот же commit Bearium, ревизию Mozilla и MOZ_BUILD_DATE** из
+подтверждённого успешного запуска `main`. Другие ветки, PR-запуски и несовпадающие
+сведения об исходниках отвергаются. APK-артефакты хранятся 30 дней: для более
+поздней повторной сборки запустить новый APK workflow.
 
-Создать **Environment variable**, не secret:
+## 4. Включить автоматизацию Google Play
 
-| Имя | Значение |
-|---|---|
-| `BEARIUM_UPLOAD_CERT_SHA256` | SHA-256 upload certificate; с двоеточиями или без |
+Ежедневный GitHub cron сохранён: **23:00 UTC**, то есть 04:00 UTC+5 следующего дня.
+При уже выпущенной стабильной версии компиляция пропускается. При новой версии
+формируются production APK и GitHub Release. Затем срабатывает Play workflow.
+Если в проверке новой версии не было, у запуска нет release artifact и Play
+также пропускается. Ошибка/задержка Play не меняет GitHub Release.
 
-Production-сборка прекращается при отсутствующих секретах, неверном отпечатке
-или попытке использовать известный публичный debug certificate. Ключ временно
-распаковывается с правами 0600 и удаляется после шага. В artifact он не входит.
+### Только автоматическая сборка AAB
 
-## 4. Собрать и загрузить AAB
+В **Settings → Secrets and variables → Actions → Variables** установить
+repository variable `BEARIUM_PLAY_ENABLED=true`. После каждого нового GitHub
+выпуска будет автоматически собран проверенный AAB. Его можно загрузить вручную.
 
-1. Слить PR с подготовкой Bearium в `main`.
-2. Открыть **Actions → Build Bearium for Google Play → Run workflow**.
-3. Выбрать `main`. Для первой загрузки указать `version_code = 1`.
-4. Для следующей загрузки указать 2, затем 3 и так далее. Число обязано быть
-   больше всех уже загруженных в Play кодов, включая тестовые дорожки.
-   Повторный запуск неудавшейся сборки допустим с прежним кодом, если AAB ещё
-   не загружался. Версия Firefox остаётся в `versionName`.
-5. Дождаться завершения `native` и `bundle`. Скачать artifact
-   `Bearium-play-<version_code>`. В нём должны быть AAB, SHA-256, manifest,
-   JSON-отчёт проверок, ревизия Mozilla и commit Bearium.
-6. В Play Console открыть **Testing → Internal testing → Create new release**.
-7. Завершить настройку Play App Signing, загрузить `Bearium.aab`, добавить
-   release notes и сохранить выпуск.
-8. Добавить свой Google-аккаунт в список тестировщиков, открыть opt-in ссылку
-   на устройстве и установить приложение именно через Google Play.
+### Автоматическая отправка AAB
 
-Не брать для этой проверки APK из обычных GitHub Releases. Не использовать
-**Internal app sharing** вместо Internal testing: у app sharing может быть
-другая подпись, не та, которую нужно заявлять для WebAuthn.
+После первой успешной ручной публикации и заполнения деклараций:
 
-На 12.09.2026 для новых обычных Android-приложений требуется **target SDK 36+**.
-Сборка проверяет фактический manifest и остановится при меньшем значении;
-не маскировать несовместимый upstream заменой числа в готовом manifest.
-[Требования Google к target API](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en).
+1. Создать Google Cloud project и включить **Google Play Android Developer API**.
+2. Создать service account. В Play Console → Users and permissions добавить его
+   email, ограничить доступ приложением Bearium и выдать права на выбранную
+   дорожку. Для Internal testing достаточно необходимых прав на тестовые releases;
+   для production нужны соответствующие права публикации, не billing/admin.
+3. Создать JSON key service account. В GitHub создать окружение `google-play`,
+   ограничить веткой `main`, положить JSON целиком в secret
+   `BEARIUM_PLAY_SERVICE_ACCOUNT_JSON`.
+4. В окружении `google-play` задать переменные:
 
-16 КБ проверяются для всех 64-битных `.so`, включая сторонние зависимости.
-При отказе проверка укажет библиотеку: её нужно пересобрать/обновить, а не
-отключать проверку. Статического выравнивания недостаточно — запуск и WebAuthn
-проверить также на устройстве/эмуляторе с `adb shell getconf PAGE_SIZE = 16384`.
-[Документация Android по 16 КБ](https://developer.android.com/guide/practices/page-sizes).
+| Variable | Начальное значение | Назначение |
+|---|---|---|
+| `BEARIUM_PLAY_TRACK` | `internal` | Track ID: internal, alpha, beta, production или свой ID |
+| `BEARIUM_PLAY_RELEASE_STATUS` | `completed` | Публикация на выбранной дорожке; `draft` оставляет черновик |
+| `BEARIUM_PLAY_USER_FRACTION` | пусто | Только для `inProgress`, например `0.1` = 10% |
+
+5. В repository variables установить `BEARIUM_PLAY_AUTO_UPLOAD=true`.
+   `BEARIUM_PLAY_ENABLED=true` также должен быть включён.
+6. Для первой проверки можно вручную запустить Play workflow с `build_run_id`
+   и `publish=true`, не дожидаясь следующей версии Mozilla.
+7. После тестирования и допуска аккаунта в production сменить track на
+   `production`. Для постепенной раскатки установить status `inProgress` и
+   fraction. Наличие другого незавершённого staged rollout останавливает новую
+   публикацию, чтобы не заменить его автоматически.
+
+Используется официальный `google-auth` и Android Publisher API: upload bundle,
+update track, validate edit, commit. Повторная отправка не откатывает более новую
+версию и не создаёт повторный release для уже установленного состояния track.
+Активная проверка Google не отменяется: применяется `ERROR_IF_IN_REVIEW`.
+При сетевой ошибке или незавершённой проверке повторить Play workflow с тем же
+`build_run_id` после устранения причины. GitHub APK уже остаются доступными.
+Проверка Google, первые декларации и допуск production не обходятся API.
+
+[Настройка Android Publisher API](https://developers.google.com/android-publisher/getting_started),
+[загрузка AAB](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.bundles/upload),
+[обновление track](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks/update),
+[commit и поведение при review](https://developers.google.com/android-publisher/api-ref/rest/v3/edits/commit).
+
+### Проверки production-сборки
+
+Проверяются закрытый сертификат и целостность подписи, package, versionCode,
+versionName, отсутствие debuggable/testOnly/sharedUserId, комплектность Gecko
+для arm64/armv7/x86_64, ELF-архитектуры, 16 КБ PT_LOAD всех 64-битных `.so`,
+bundletool validation, 16 КБ ZIP alignment и label временного APK. Временный
+APK используется только для проверки; доставляемый AAB подписан закрытым ключом.
+SHA-256 AAB повторно сверяется с отчётом перед отправкой в Google.
+
+На 12.09.2026 обычному новому Android-приложению нужен **target SDK 36+**.
+Проверяется реальный manifest. Для 16 КБ требуется также запуск на устройстве/
+эмуляторе с `adb shell getconf PAGE_SIZE = 16384`; статические проверки не
+заменяют тест загрузок, вкладок, CA-предупреждения и passkeys.
+[Target API Google Play](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en),
+[Android 16 КБ](https://developer.android.com/guide/practices/page-sizes).
 
 ## 5. Заполнить карточку и декларации
 
@@ -307,6 +370,6 @@ issue оставлять только относящийся к ошибке ф�
 Код и автоматические проверки подготавливают выпуск, но окончательная готовность
 подтверждается только успешным AAB, установкой из Play, тестами на устройствах,
 заполненными декларациями и решениями Google по магазину и privileged access.
-Закрытый ключ, аккаунт Play и заявку Google владелец оформляет сам по шагам выше.
+Закрытые ключи, аккаунт Play и заявку Google владелец оформляет сам по шагам выше.
 При отказе Google собственный authenticator на Keystore/BiometricPrompt — отдельный
 проект с аудитом безопасности, а не безопасный однострочный обход.

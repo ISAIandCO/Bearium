@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the private upload identity before invoking Gradle; never print secrets."""
+"""Validate the private signing identity before invoking Gradle; never print secrets."""
 import base64
 import hashlib
 import os
@@ -16,14 +16,14 @@ def normalize(value):
     return digest
 
 def main():
-    for name in ('BEARIUM_KEYSTORE_BASE64','BEARIUM_KEYSTORE','BEARIUM_STORE_PASSWORD','BEARIUM_KEY_PASSWORD','BEARIUM_KEY_ALIAS','BEARIUM_UPLOAD_CERT_SHA256'):
+    for name in ('BEARIUM_KEYSTORE_BASE64','BEARIUM_KEYSTORE','BEARIUM_STORE_PASSWORD','BEARIUM_KEY_PASSWORD','BEARIUM_KEY_ALIAS','BEARIUM_EXPECTED_CERT_SHA256'):
         if not os.environ.get(name): raise ValueError(f'Missing {name}')
-    expected=normalize(os.environ['BEARIUM_UPLOAD_CERT_SHA256'])
+    expected=normalize(os.environ['BEARIUM_EXPECTED_CERT_SHA256'])
     path=Path(os.environ['BEARIUM_KEYSTORE'])
     path.write_bytes(base64.b64decode(os.environ['BEARIUM_KEYSTORE_BASE64'],validate=True))
     path.chmod(0o600)
     result=subprocess.run(['keytool','-exportcert','-keystore',str(path),'-storepass:env','BEARIUM_STORE_PASSWORD','-alias',os.environ['BEARIUM_KEY_ALIAS']],capture_output=True,check=True)
-    if hashlib.sha256(result.stdout).hexdigest()!=expected: raise ValueError('Upload certificate does not match the pinned fingerprint')
-    print('Private upload certificate matches the pinned SHA-256')
+    if hashlib.sha256(result.stdout).hexdigest()!=expected: raise ValueError('Signing certificate does not match the pinned fingerprint')
+    print('Private signing certificate matches the pinned SHA-256')
 
 if __name__=='__main__': main()
