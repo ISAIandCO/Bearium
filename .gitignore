@@ -5,3 +5,10 @@ __pycache__/
 .ruff_cache/
 artifacts/
 firefox-source/
+
+# Private production signing material
+*.jks
+*.p12
+*.pem.key
+upload-keystore*
+play-artifacts/

@@ -1,0 +1,286 @@
+name: Build Bearium for Google Play
+
+on:
+  workflow_run:
+    workflows: ["Build and release Bearium for Android"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'Successful main-branch production APK workflow run ID'
+        required: true
+        type: string
+      publish:
+        description: 'Upload to the configured Play track after building'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: bearium-google-play
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && vars.BEARIUM_PLAY_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.source.outputs.eligible }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      source_json: ${{ steps.source.outputs.source_json }}
+      source_commit: ${{ steps.source.outputs.source_commit }}
+      version_code: ${{ steps.source.outputs.version_code }}
+      build_date: ${{ steps.source.outputs.build_date }}
+      archive_url: ${{ steps.source.outputs.archive_url }}
+      revision: ${{ steps.source.outputs.revision }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the originating release and read its exact source identity
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
+        run: |
+          python3 scripts/resolve_play_source.py >> "$GITHUB_OUTPUT"
+
+  bundle:
+    needs: resolve
+    if: needs.resolve.outputs.eligible == 'true'
+    environment: release-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      MOZ_BUILD_DATE: ${{ needs.resolve.outputs.build_date }}
+      MOZ_OBJDIR_NAME: obj-ruthenium-arm64-v8a
+      RFIREFOX_DEBUG_CERT_SHA256: d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f
+      RFIREFOX_TARGET: aarch64-linux-android
+      RFIREFOX_TARGET_ABI: arm64-v8a
+      TARGET_ABI: arm64-v8a
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_commit }}
+
+      - name: Set build paths
+        run: |
+          echo "FIREFOX_SOURCE_DIR=$RUNNER_TEMP/firefox-source" >> "$GITHUB_ENV"
+          echo "MOZCONFIG=$RUNNER_TEMP/firefox-source/mozconfig" >> "$GITHUB_ENV"
+          echo "RFIREFOX_DEBUG_KEYSTORE=$GITHUB_WORKSPACE/signing/rfirefox-debug.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=" >> "$GITHUB_ENV"
+
+      - name: Verify the repository debug key
+        run: |
+          test -f "$RFIREFOX_DEBUG_KEYSTORE"
+          fingerprint="$(
+            keytool -list -v \
+              -keystore "$RFIREFOX_DEBUG_KEYSTORE" \
+              -storepass android \
+              -alias androiddebugkey |
+              sed -n 's/^[[:space:]]*SHA256: //p' |
+              tr -d ':' |
+              tr '[:upper:]' '[:lower:]'
+          )"
+          test "$fingerprint" = "$RFIREFOX_DEBUG_CERT_SHA256"
+
+      - name: Free space on the ephemeral GitHub runner
+        if: runner.environment == 'github-hosted'
+        run: |
+          sudo rm -rf -- \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes mercurial unzip
+
+      - name: Cache Mozilla toolchains and Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mozbuild
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: firefox-android-arm64-v8a-v3-${{ runner.os }}-${{ needs.resolve.outputs.revision }}
+          restore-keys: |
+            firefox-android-arm64-v8a-v3-${{ runner.os }}-
+
+      - name: Download the exact stable source archive
+        env:
+          ARCHIVE_URL: ${{ needs.resolve.outputs.archive_url }}
+          EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          archive="$RUNNER_TEMP/firefox-source.zip"
+          unpacked="$RUNNER_TEMP/firefox-unpacked"
+          curl --fail --location --show-error \
+            --retry 5 --retry-all-errors \
+            --connect-timeout 30 \
+            --output "$archive" \
+            "$ARCHIVE_URL"
+          mkdir -p "$unpacked"
+          unzip -q "$archive" -d "$unpacked"
+          source_root="$(find "$unpacked" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$source_root"
+          mv "$source_root" "$FIREFOX_SOURCE_DIR"
+          test "$(tr -d '\r\n' < "$FIREFOX_SOURCE_DIR/browser/config/version.txt")" = "$EXPECTED_VERSION"
+          rm -f -- "$archive"
+
+      - name: Verify and apply Ruthenium patches
+        run: python3 scripts/patch_firefox.py --source "$FIREFOX_SOURCE_DIR"
+
+      - name: Bootstrap GeckoView and Fenix toolchains
+        working-directory: ${{ runner.temp }}/firefox-source
+        env:
+          RFIREFOX_BOOTSTRAP_HEARTBEAT_SECONDS: "60"
+        run: |
+          # Mozilla stores the downloaded NDK archive under mozboot, but unzip
+          # extracts it with ~/.mozbuild as its working directory. A restored
+          # android-ndk-r29 directory therefore triggers an interactive replace
+          # prompt and EOF even when mozboot itself was removed.
+          # Both paths are disposable on this fixed-home GitHub-hosted runner.
+          test "$HOME" = "/home/runner"
+          rm -rf -- \
+            /home/runner/.mozbuild/mozboot \
+            /home/runner/.mozbuild/android-ndk-r29
+          bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"
+          test -f "$MOZCONFIG"
+          # GNU config.guess identifies the x86_64 runner as
+          # x86_64-pc-linux-gnu, while Rust uses x86_64-unknown-linux-gnu.
+          # New Rust releases can expose several compatible GNU/Linux targets,
+          # so Firefox may not be able to infer the Rust host unambiguously.
+          # Normalize the build host explicitly, then select this matrix job's
+          # Android target as before.
+          sed -i -E \
+            -e '/^[[:space:]]*ac_add_options[[:space:]]+--host=/d' \
+            -e '/^[[:space:]]*ac_add_options[[:space:]]+--target=/d' \
+            "$MOZCONFIG"
+          {
+            echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/$MOZ_OBJDIR_NAME"
+            echo "ac_add_options --host=x86_64-unknown-linux-gnu"
+            echo "ac_add_options --target=$RFIREFOX_TARGET"
+            echo "ac_add_options --enable-release"
+            echo "ac_add_options --disable-debug"
+            echo "ac_add_options --disable-debug-symbols"
+            echo "ac_add_options --enable-optimize"
+          } >> "$MOZCONFIG"
+          test "$(grep -Ec '^[[:space:]]*ac_add_options[[:space:]]+--host=' "$MOZCONFIG")" -eq 1
+          test "$(grep -Ec '^[[:space:]]*ac_add_options[[:space:]]+--target=' "$MOZCONFIG")" -eq 1
+          grep -F "ac_add_options --host=x86_64-unknown-linux-gnu" "$MOZCONFIG"
+          grep -F "ac_add_options --target=$RFIREFOX_TARGET" "$MOZCONFIG"
+
+      - name: Upload bootstrap diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-bootstrap-diagnostics-arm64-v8a-${{ needs.resolve.outputs.version }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/rfirefox-bootstrap/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Build patched GeckoView
+        working-directory: ${{ runner.temp }}/firefox-source
+        run: ./mach build
+
+      - name: Stop GeckoView Gradle daemons before Fenix packaging
+        working-directory: ${{ runner.temp }}/firefox-source
+        run: |
+          ./gradlew --stop
+          ./gradlew --status || true
+          free -h
+
+      - name: Download same-run ABI APKs
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: bearium-apk-*
+          path: native-apks
+          merge-multiple: true
+
+      - name: Stage additional Gecko architectures
+        run: |
+          python3 scripts/stage_bundle_native.py --apk-dir native-apks \
+            --source "$FIREFOX_SOURCE_DIR" --objdir "$MOZ_OBJDIR_NAME" \
+            --output "$FIREFOX_SOURCE_DIR/$MOZ_OBJDIR_NAME/dist/geckoview/lib"
+
+      - name: Build and verify the production App Bundle
+        working-directory: ${{ runner.temp }}/firefox-source
+        env:
+          GRADLE_INVOKED_WITHIN_MACH_BUILD: "1"
+          BEARIUM_PRODUCTION: "1"
+          BEARIUM_VERSION_CODE: ${{ needs.resolve.outputs.version_code }}
+          BEARIUM_KEYSTORE: ${{ runner.temp }}/bearium-upload.jks
+          BEARIUM_KEYSTORE_BASE64: ${{ secrets.BEARIUM_UPLOAD_KEYSTORE_BASE64 || secrets.BEARIUM_KEYSTORE_BASE64 }}
+          BEARIUM_STORE_PASSWORD: ${{ secrets.BEARIUM_UPLOAD_STORE_PASSWORD || secrets.BEARIUM_STORE_PASSWORD }}
+          BEARIUM_KEY_ALIAS: ${{ secrets.BEARIUM_UPLOAD_KEY_ALIAS || secrets.BEARIUM_KEY_ALIAS }}
+          BEARIUM_KEY_PASSWORD: ${{ secrets.BEARIUM_UPLOAD_KEY_PASSWORD || secrets.BEARIUM_KEY_PASSWORD }}
+          BEARIUM_EXPECTED_CERT_SHA256: ${{ vars.BEARIUM_UPLOAD_CERT_SHA256 || vars.BEARIUM_SIGNING_CERT_SHA256 }}
+          BEARIUM_EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f -- "$BEARIUM_KEYSTORE"' EXIT
+          python3 "$GITHUB_WORKSPACE/scripts/prepare_play_signing.py"
+          ./mach gradle --no-daemon --max-workers=2 fenix:bundleRelease
+          mkdir -p "$GITHUB_WORKSPACE/play-artifacts"
+          mapfile -t bundles < <(find "$MOZ_OBJDIR_NAME/gradle/build/mobile/android/fenix/app/outputs/bundle/release" -name '*.aab')
+          test "${#bundles[@]}" -eq 1
+          cp "${bundles[0]}" "$GITHUB_WORKSPACE/play-artifacts/Bearium.aab"
+          python3 "$GITHUB_WORKSPACE/scripts/verify_play_bundle.py" \
+            --aab "$GITHUB_WORKSPACE/play-artifacts/Bearium.aab" \
+            --version-code "$BEARIUM_VERSION_CODE" --version-name "$BEARIUM_EXPECTED_VERSION" \
+            --certificate "$BEARIUM_EXPECTED_CERT_SHA256"
+
+      - name: Record reproducible build identity
+        env:
+          SOURCE_JSON: ${{ needs.resolve.outputs.source_json }}
+          VERSION_CODE: ${{ needs.resolve.outputs.version_code }}
+        run: |
+          printf '%s\n' "$SOURCE_JSON" > play-artifacts/mozilla-source.json
+          printf 'Bearium commit: %s\nPlay versionCode: %s\n' "$(git rev-parse HEAD)" "$VERSION_CODE" > play-artifacts/build-info.txt
+          cd play-artifacts
+          sha256sum Bearium.aab > Bearium.aab.sha256
+
+      - name: Upload verified Play bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bearium-play-${{ needs.resolve.outputs.version_code }}
+          path: play-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  upload:
+    needs: [resolve, bundle]
+    if: (github.event_name == 'workflow_run' && vars.BEARIUM_PLAY_AUTO_UPLOAD == 'true') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    environment: google-play
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: Bearium-play-${{ needs.resolve.outputs.version_code }}
+          path: play-artifacts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Google authentication library
+        run: python3 -m pip install -r scripts/play-requirements.txt
+      - name: Upload and commit the configured Play track
+        env:
+          BEARIUM_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.BEARIUM_PLAY_SERVICE_ACCOUNT_JSON }}
+          BEARIUM_PLAY_TRACK: ${{ vars.BEARIUM_PLAY_TRACK || 'internal' }}
+          BEARIUM_PLAY_RELEASE_STATUS: ${{ vars.BEARIUM_PLAY_RELEASE_STATUS || 'completed' }}
+          BEARIUM_PLAY_USER_FRACTION: ${{ vars.BEARIUM_PLAY_USER_FRACTION }}
+        run: |
+          python3 scripts/upload_play.py --aab play-artifacts/Bearium.aab \
+            --version-code "${{ needs.resolve.outputs.version_code }}"

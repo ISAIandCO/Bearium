@@ -30,7 +30,7 @@ class CertificatePatchTest(unittest.TestCase):
 </resources>
 """
         patched = patch_firefox.patch_fenix_strings(strings)
-        self.assertIn(">Rufox</string>", patched)
+        self.assertIn(">Bearium</string>", patched)
         self.assertEqual(patched, patch_firefox.patch_fenix_strings(patched))
 
         release_strings = (
@@ -40,7 +40,7 @@ class CertificatePatchTest(unittest.TestCase):
         patched_release = patch_firefox.patch_fenix_release_strings(
             release_strings
         )
-        self.assertIn(">Rufox</string>", patched_release)
+        self.assertIn(">Bearium</string>", patched_release)
         self.assertEqual(
             patched_release,
             patch_firefox.patch_fenix_release_strings(patched_release),
@@ -65,6 +65,7 @@ class CertificatePatchTest(unittest.TestCase):
     }
     buildTypes {
         release releaseTemplate >> {
+            applicationIdSuffix ".firefox"
             def deepLinkSchemeValue = "fenix"
             manifestPlaceholders.putAll([
                     "sharedUserId": "org.mozilla.firefox.sharedID",
@@ -79,7 +80,7 @@ class CertificatePatchTest(unittest.TestCase):
         self.assertIn("signingConfig = signingConfigs.debug", patched)
         self.assertIn("RFIREFOX_DEBUG_KEYSTORE", patched)
         self.assertIn('signingConfigs.debug.keyAlias = "androiddebugkey"', patched)
-        self.assertIn('applicationId "app.ruthenium"', patched)
+        self.assertIn('applicationId "app.bearium"', patched)
         self.assertIn('System.getenv("RFIREFOX_TARGET_ABI")', patched)
         self.assertIn(
             '["armeabi-v7a", "arm64-v8a", "x86_64"]',
@@ -92,56 +93,15 @@ class CertificatePatchTest(unittest.TestCase):
         self.assertNotIn("universalApk true", patched)
         self.assertEqual(patched, patch_firefox.patch_fenix_gradle(patched))
 
-    def test_launcher_uses_integrated_fox_r_adaptive_assets(self) -> None:
-        upstream = """<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:viewportWidth="108"><path android:pathData="M0,0" /></vector>
-"""
+    def test_launcher_uses_independent_vector_assets(self) -> None:
+        upstream = '<vector xmlns:android="http://schemas.android.com/apk/res/android"><path/></vector>'
         patched = patch_firefox.patch_fenix_launcher_foreground(upstream)
-        self.assertEqual(patched, patch_firefox.RFIREFOX_ADAPTIVE_FOREGROUND)
-        self.assertNotIn('android:pathData="M0,0"', patched)
-        self.assertIn("Rufox adaptive fox-R foreground", patched)
-        self.assertIn(
-            'android:src="@drawable/rfirefox_launcher_foreground"', patched
-        )
-        self.assertNotIn("<path", patched)
-        foreground_root = ElementTree.fromstring(patched)
-        self.assertEqual(foreground_root.tag, "bitmap")
-        self.assertEqual(
-            foreground_root.attrib[
-                "{http://schemas.android.com/apk/res/android}src"
-            ],
-            "@drawable/rfirefox_launcher_foreground",
-        )
-        self.assertEqual(
-            foreground_root.attrib[
-                "{http://schemas.android.com/apk/res/android}gravity"
-            ],
-            "fill",
-        )
-        self.assertEqual(
-            patched,
-            patch_firefox.patch_fenix_launcher_foreground(patched),
-        )
-
-        self.assertEqual(len(patch_firefox.FENIX_LEGACY_ICONS), 10)
-        self.assertEqual(len(patch_firefox.FENIX_ADAPTIVE_ICONS), 1)
-        for asset_path, _ in (
-            *patch_firefox.FENIX_LEGACY_ICONS,
-            *patch_firefox.FENIX_ADAPTIVE_ICONS,
-        ):
-            data = Path(asset_path).read_bytes()
-            self.assertTrue(data.startswith(b"RIFF"), asset_path)
-            self.assertEqual(data[8:12], b"WEBP", asset_path)
-
-        for asset_path, _ in patch_firefox.FENIX_ADAPTIVE_ICONS:
-            data = Path(asset_path).read_bytes()
-            self.assertEqual(data[12:16], b"VP8L", asset_path)
-            self.assertEqual(data[20], 0x2F, asset_path)
-            lossless_header = int.from_bytes(data[21:25], "little")
-            width = (lossless_header & 0x3FFF) + 1
-            height = ((lossless_header >> 14) & 0x3FFF) + 1
-            self.assertEqual((width, height), (432, 432), asset_path)
-            self.assertTrue(lossless_header & (1 << 28), asset_path)
+        self.assertEqual(ElementTree.fromstring(patched).tag, "vector")
+        self.assertEqual(patched, patch_firefox.patch_fenix_launcher_foreground(patched))
+        for asset, _ in patch_firefox.FENIX_ADAPTIVE_ICONS:
+            ElementTree.fromstring(asset.read_text())
+        for asset, _ in patch_firefox.FENIX_LEGACY_ICONS:
+            self.assertEqual(asset.read_bytes()[:4], b"RIFF")
 
     def test_themed_launcher_does_not_flatten_fox_r_to_black_r(self) -> None:
         adaptive_icon = """<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
@@ -151,8 +111,8 @@ class CertificatePatchTest(unittest.TestCase):
 </adaptive-icon>
 """
         adaptive_icon = patch_firefox.patch_fenix_adaptive_icon(adaptive_icon)
-        self.assertIn("intentionally keeps its full-colour", adaptive_icon)
-        self.assertNotIn("<monochrome", adaptive_icon)
+        self.assertIn("@drawable/bearium_background", adaptive_icon)
+        self.assertIn("<monochrome", adaptive_icon)
         adaptive_root = ElementTree.fromstring(adaptive_icon)
         self.assertEqual(adaptive_root.tag, "adaptive-icon")
         self.assertEqual(

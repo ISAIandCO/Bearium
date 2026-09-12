@@ -1,7 +1,8 @@
-# Public Rufox debug key
+# Public Bearium debug key
 
 `rfirefox-debug.keystore` is an intentionally public Android debug keystore used
-only for releases whose Firefox version ends in `_debug`.
+only for upstream build configuration and local development builds. Production
+GitHub APKs and Play bundles must use private signing material.
 
 Configuration:
 
@@ -17,6 +18,12 @@ The workflow passes this file to the Fenix build through the
 certificate and the certificate in every resulting APK against
 `debug-key-lock.json`/the pinned workflow value.
 
-This key provides signature continuity between Rufox debug builds, but no
+This key provides signature continuity between Bearium debug builds, but no
 publisher authentication: anyone who clones the repository has the private key
 and can sign an APK accepted as an update. Never reuse this key for production.
+
+Production APK использует закрытый app-signing key из `release-signing`.
+Play AAB может использовать отдельный upload key; app-signing key в Play
+должен совпадать с GitHub для совместимых обновлений.
+[Настройка ключей и публикация](../docs/GOOGLE_PLAY_WEBAUTHN.md).
+Публичный ключ из этого каталога запрещён для production.

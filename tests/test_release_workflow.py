@@ -24,7 +24,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", publish)
         self.assertIn("github.ref == 'refs/heads/main'", publish)
 
-    def test_release_uses_committed_debug_key_and_debug_version_suffix(self) -> None:
+    def test_release_uses_private_key_and_plain_version_tag(self) -> None:
         self.assertNotIn("-PdisableDebugSigning", self.workflow)
         self.assertNotIn('"$apksigner" sign', self.workflow)
         self.assertIn('"$apksigner" verify', self.workflow)
@@ -37,7 +37,10 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
             "d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f",
             self.workflow,
         )
-        self.assertIn('release_tag="${FIREFOX_VERSION}_debug"', self.workflow)
+        self.assertIn('release_tag="${FIREFOX_VERSION}"', self.workflow)
+        self.assertIn('BEARIUM_PRODUCTION: "1"', self.workflow)
+        self.assertIn("prepare_play_signing.py", self.workflow)
+        self.assertIn("environment: release-signing", self.workflow)
         self.assertIn('--title "$RELEASE_TAG"', self.workflow)
         self.assertIn('gh release create "$RELEASE_TAG"', self.workflow)
 
@@ -84,13 +87,13 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("scripts/verify_android_apk.py", self.workflow)
         self.assertIn('--abi "$TARGET_ABI"', self.workflow)
         self.assertIn("native-code: '$TARGET_ABI'", self.workflow)
-        self.assertIn("name: rufox-apk-${{ matrix.abi }}", self.workflow)
+        self.assertIn("name: bearium-apk-${{ matrix.abi }}", self.workflow)
         self.assertIn("path: artifacts-${{ matrix.abi }}/", self.workflow)
 
     def test_release_is_published_only_after_all_abis_pass(self) -> None:
         self.assertIn("needs: [resolve, build]", self.workflow)
         self.assertIn("needs.build.result == 'success'", self.workflow)
-        self.assertIn("pattern: rufox-apk-*", self.workflow)
+        self.assertIn("pattern: bearium-apk-*", self.workflow)
         self.assertIn("merge-multiple: true", self.workflow)
         self.assertIn(
             "expected_abis=(arm64-v8a armeabi-v7a x86_64)", self.workflow
@@ -117,13 +120,13 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         )
 
     def test_rufox_branding_is_checked_before_publish(self) -> None:
-        self.assertIn("Build and release Rufox for Android", self.workflow)
-        self.assertIn("application-label:'Rufox'", self.workflow)
+        self.assertIn("Build and release Bearium for Android", self.workflow)
+        self.assertIn("application-label:'Bearium'", self.workflow)
         self.assertIn(
-            'release_name="Rufox-$RELEASE_TAG-$upstream_name.apk"',
+            'release_name="Bearium-$RELEASE_TAG-$upstream_name.apk"',
             self.workflow,
         )
-        self.assertIn("Product: Rufox", self.workflow)
+        self.assertIn("Product: Bearium", self.workflow)
 
     def test_release_publication_retries_and_is_idempotent(self) -> None:
         self.assertIn("retry_gh() {", self.workflow)
@@ -133,7 +136,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("release_ready=true", self.workflow)
         self.assertIn(
             "for asset in artifacts/*.apk artifacts/*.apk.sha256 "
-            "artifacts/build-info.txt",
+            "artifacts/*.certificate.txt artifacts/build-info.txt",
             self.workflow,
         )
         self.assertIn(
