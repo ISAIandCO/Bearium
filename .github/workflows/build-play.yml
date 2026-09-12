@@ -270,6 +270,9 @@ jobs:
         with:
           name: Bearium-play-${{ needs.resolve.outputs.version_code }}
           path: play-artifacts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install Google authentication library
         run: python3 -m pip install -r scripts/play-requirements.txt
       - name: Upload and commit the configured Play track
