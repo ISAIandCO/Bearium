@@ -1,6 +1,9 @@
-# Rufox for Android
+# Bearium for Android
 
-![Иконка Rufox: лиса формирует букву R](branding/android/rfirefox-xxxhdpi.webp)
+![Bearium](branding/android/bearium-xxxhdpi.webp)
+
+**Google Play и WebAuthn:** [пошаговая инструкция](docs/GOOGLE_PLAY_WEBAUTHN.md).
+Production: `app.bearium.browser`, dev: `app.bearium.browser.dev`.
 
 Независимая Android-сборка стабильного Firefox с ограниченной поддержкой
 `Russian Trusted Root CA`. По умолчанию корень принимается для HTTPS-сайтов
@@ -33,16 +36,16 @@
 | Диагностика | Счётчик вкладки с `99+`, причины отказов, операторы и сведения о SCT; усиленный режим в настройках защиты |
 | Повторные соединения | Для этого УЦ отключено использование сохранённых TLS-токенов и объединение разных имён в одном соединении |
 | Обычная PKI-проверка | Проверки имени хоста, подписей, срока, EKU и отзыва Firefox остаются включёнными |
-| Android-пакет | `applicationId` изменён на `app.ruthenium.firefox`, поэтому приложение устанавливается отдельно от официального Firefox |
-| Брендинг приложения | Имя приложения — `Rufox`, deep-link scheme — `ruthenium`, shared user ID — `app.ruthenium.firefox.sharedID` |
-| Иконка | Собственная лиса формирует силуэт `R`; предусмотрены square, round, adaptive и monochrome-варианты |
+| Android-пакет | `applicationId` изменён на `app.bearium.browser.dev`, поэтому приложение устанавливается отдельно от официального Firefox |
+| Брендинг приложения | Имя приложения — `Bearium`, deep-link scheme — `bearium`; общий UID с Firefox не используется |
+| Иконка | Самостоятельный медведь с пламенем; предусмотрены square, round, adaptive и monochrome-варианты |
 | Релиз | Release-вариант Fenix подписывается фиксированным публичным debug-ключом из репозитория и публикуется с суффиксом `_debug` |
 
 Патч изменяет в полученном дереве Mozilla следующие файлы:
 
 - `security/certverifier/CertVerifier.h` и `.cpp` — отдельный список корней
   только для TLS server verification;
-- `security/certverifier/RutheniumRoot.h` и `RufoxCTLogs.h` — закреплённый
+- `security/certverifier/RutheniumRoot.h` и `BeariumCTLogs.h` — закреплённый
   корень и отдельные ключи журналов;
 - `security/manager/ssl/nsNSSComponent.cpp`, `CommonSocketControl.cpp` и
   `netwerk/base/SSLTokensCache.cpp` — обновление политики и повторные соединения;
@@ -54,7 +57,7 @@
   вариант файла — имя приложения;
 - `mobile/android/fenix/app/src/main/res/drawable/ic_launcher_foreground.xml`,
   release-foreground, monochrome drawable и release WebP по всем Android
-  density — отдельная иконка с лисой, формирующей `R`.
+  density — векторная иконка медведя с пламенем.
 
 Готовые normal/round legacy-ресурсы находятся в `branding/android/`. Для
 adaptive icon патчер устанавливает прозрачный цветной foreground в безопасной
@@ -93,7 +96,7 @@ d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31
 
 Исключение не распространяется на поддомены и другие УЦ. Оно не отменяет
 самостоятельные ошибки TLS — например, просроченный сертификат или неверное
-имя. HSTS не запрещает изменение дополнительной политики Rufox.
+имя. HSTS не запрещает изменение дополнительной политики Bearium.
 
 При изменении разрешений браузер закрывает сетевые соединения, чтобы новая
 политика начала действовать. Текущие загрузки могут прерваться. Техническое
@@ -128,10 +131,10 @@ Firefox, поэтому непосредственно собирать `tip` и
 | Workflow | Триггер | Что делает |
 |---|---|---|
 | `Validate Ruthenium patches` | push в `main`, pull request или ручной запуск | Запускает быстрые unit-тесты, определяет стабильный тег и проверяет, что все точки патча существуют в текущем upstream; Firefox не собирает |
-| `Build and release Rufox for Android` | только ручной запуск и расписание | Скачивает выбранный stable changeset, собирает GeckoView/Fenix с debug signing, проверяет APK и создаёт GitHub Release |
+| `Build and release Bearium for Android` | только ручной запуск и расписание | Скачивает выбранный stable changeset, собирает GeckoView/Fenix с debug signing, проверяет APK и создаёт GitHub Release |
 
 Полная сборка **не запускается после изменения файлов или push**. Вручную её
-можно запустить на вкладке **Actions → Build and release Rufox for Android →
+можно запустить на вкладке **Actions → Build and release Bearium for Android →
 Run workflow**.
 
 Автоматический запуск назначен на 1-е, 7-е, 14-е, 21-е и 28-е число каждого
@@ -164,7 +167,7 @@ Android `apksigner` до публикации. Создание и обновл�
 
 ## Фиксированный публичный debug-ключ
 
-Secrets не требуются. Keystore `signing/rfirefox-debug.keystore` намеренно
+Для development APK secrets не требуются. Keystore `signing/rfirefox-debug.keystore` намеренно
 добавлен в репозиторий и используется всеми локальными и GitHub Actions
 debug-релизами. Параметры стандартные для Android debug signing:
 
@@ -176,7 +179,7 @@ APK через `apksigner`. Ожидаемые параметры также з�
 Один и тот же ключ позволяет устанавливать следующие `_debug`-версии поверх
 предыдущих. Однако это не защищённая release-подпись: приватный ключ и пароли
 видны всем. Любой человек может подписать этим ключом изменённый APK, который
-Android примет как обновление Rufox.
+Android примет как обновление Bearium.
 
 ## Установка и обновление
 

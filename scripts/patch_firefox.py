@@ -53,7 +53,7 @@ ICON_SOURCE_DIR = REPOSITORY_ROOT / "branding/android"
 ICON_DENSITIES = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
 FENIX_LEGACY_ICONS = tuple(
     (
-        ICON_SOURCE_DIR / f"rfirefox-{density}.webp",
+        ICON_SOURCE_DIR / f"bearium-{density}.webp",
         Path(
             f"mobile/android/fenix/app/src/release/res/mipmap-{density}/"
             "ic_launcher.webp"
@@ -62,7 +62,7 @@ FENIX_LEGACY_ICONS = tuple(
     for density in ICON_DENSITIES
 ) + tuple(
     (
-        ICON_SOURCE_DIR / f"rfirefox-round-{density}.webp",
+        ICON_SOURCE_DIR / f"bearium-round-{density}.webp",
         Path(
             f"mobile/android/fenix/app/src/release/res/mipmap-{density}/"
             "ic_launcher_round.webp"
@@ -70,14 +70,13 @@ FENIX_LEGACY_ICONS = tuple(
     )
     for density in ICON_DENSITIES
 )
-FENIX_ADAPTIVE_ICONS = (
-    (
-        ICON_SOURCE_DIR / "rfirefox-adaptive-foreground.webp",
-        Path(
-            "mobile/android/fenix/app/src/main/res/drawable-xxxhdpi/"
-            "rfirefox_launcher_foreground.webp"
-        ),
-    ),
+FENIX_ADAPTIVE_ICONS = tuple(
+    (ICON_SOURCE_DIR / filename,
+     Path(f"mobile/android/fenix/app/src/{variant}/res/drawable/{resource}.xml"))
+    for variant in ("main", "release")
+    for filename, resource in (("bearium-foreground.xml", "ic_launcher_foreground"),
+                               ("bearium-monochrome.xml", "ic_launcher_monochrome"),
+                               ("bearium-background.xml", "bearium_background"))
 )
 
 TEXT_TARGETS = (
@@ -180,7 +179,7 @@ def patch_fenix_gradle(source: str) -> str:
     source = replace_once(
         source,
         '        applicationId "org.mozilla"',
-        '        applicationId "app.ruthenium"',
+        '        applicationId "app.bearium"',
         "Fenix application ID",
     )
     source = replace_once(
@@ -214,42 +213,61 @@ def patch_fenix_gradle(source: str) -> str:
         section,
         "        release releaseTemplate >> {\n",
         """        release releaseTemplate >> {
-            // Rufox development releases use the public debug key that is
-            // pinned and passed in by the build tooling repository.
-            def rfirefoxDebugKeystore = System.getenv("RFIREFOX_DEBUG_KEYSTORE")
-            if (!rfirefoxDebugKeystore) {
-                throw new GradleException("RFIREFOX_DEBUG_KEYSTORE is required")
+            // Production never falls back to the public development key.
+            def beariumProduction = System.getenv("BEARIUM_PRODUCTION") == "1"
+            debuggable false
+            if (beariumProduction) {
+                def required = ["BEARIUM_KEYSTORE", "BEARIUM_STORE_PASSWORD", "BEARIUM_KEY_ALIAS", "BEARIUM_KEY_PASSWORD", "BEARIUM_VERSION_CODE"]
+                required.each { key ->
+                    if (!System.getenv(key)) throw new GradleException(key + " is required")
+                }
+                def upload = signingConfigs.maybeCreate("beariumUpload")
+                upload.storeFile = project.file(System.getenv("BEARIUM_KEYSTORE"))
+                upload.storePassword = System.getenv("BEARIUM_STORE_PASSWORD")
+                upload.keyAlias = System.getenv("BEARIUM_KEY_ALIAS")
+                upload.keyPassword = System.getenv("BEARIUM_KEY_PASSWORD")
+                signingConfig = upload
+            } else {
+                def rfirefoxDebugKeystore = System.getenv("RFIREFOX_DEBUG_KEYSTORE")
+                if (!rfirefoxDebugKeystore) throw new GradleException("RFIREFOX_DEBUG_KEYSTORE is required")
+                signingConfigs.debug.storeFile = project.file(rfirefoxDebugKeystore)
+                signingConfigs.debug.storePassword = "android"
+                signingConfigs.debug.keyAlias = "androiddebugkey"
+                signingConfigs.debug.keyPassword = "android"
+                signingConfig = signingConfigs.debug
             }
-            signingConfigs.debug.storeFile = project.file(rfirefoxDebugKeystore)
-            signingConfigs.debug.storePassword = "android"
-            signingConfigs.debug.keyAlias = "androiddebugkey"
-            signingConfigs.debug.keyPassword = "android"
-            signingConfig = signingConfigs.debug
 """,
         "Fenix release debug signing",
     )
     replacements = {
         'def deepLinkSchemeValue = "fenix"':
-            'def deepLinkSchemeValue = "ruthenium"',
+            'def deepLinkSchemeValue = "bearium"',
         '"sharedUserId": "org.mozilla.firefox.sharedID"':
-            '"sharedUserId": "app.ruthenium.firefox.sharedID"',
+            '"sharedUserId": "app.bearium.browser.sharedID"',
     }
     for old, new in replacements.items():
         if new not in section:
             if section.count(old) != 1:
                 raise ValueError(f"Fenix release branding anchor is ambiguous: {old}")
             section = section.replace(old, new, 1)
-    return source[:start] + section + source[end:]
+    section = replace_once(section, 'applicationIdSuffix ".firefox"',
+        'applicationIdSuffix (System.getenv("BEARIUM_PRODUCTION") == "1" ? ".browser" : ".browser.dev")',
+        "Bearium package suffix")
+    source = source[:start] + section + source[end:]
+    marker = "// BEGIN Bearium packaging"
+    if marker not in source:
+        source += "\n" + (REPOSITORY_ROOT / "native/bearium-build.gradle").read_text()
+    return source
 
 
 def patch_fenix_strings(source: str) -> str:
     replacements = {
         '<string name="app_name" translatable="false">Firefox Fenix</string>':
-            '<string name="app_name" translatable="false">Rufox</string>',
+            '<string name="app_name" translatable="false">Bearium</string>',
         '<string name="firefox" translatable="false">Firefox</string>':
-            '<string name="firefox" translatable="false">Rufox</string>',
+            '<string name="firefox" translatable="false">Bearium</string>',
         '<string name="app_name_firefox" tools:ignore="BrandUsage">Firefox</string>':
-            '<string name="app_name_firefox" tools:ignore="BrandUsage">Rufox</string>',
+            '<string name="app_name_firefox" tools:ignore="BrandUsage">Bearium</string>',
     }
     for old, new in replacements.items():
         source = replace_once(source, old, new, "Fenix application name")
@@ -260,54 +278,92 @@ def patch_fenix_release_strings(source: str) -> str:
     return replace_once(
         source,
         '<string name="app_name" translatable="false">Firefox</string>',
-        '<string name="app_name" translatable="false">Rufox</string>',
+        '<string name="app_name" translatable="false">Bearium</string>',
         "Fenix release application name",
     )
 
 
-RFIREFOX_ADAPTIVE_FOREGROUND = """<?xml version="1.0" encoding="utf-8"?>
-<!-- Rufox adaptive fox-R foreground. -->
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/rfirefox_launcher_foreground"
-    android:antialias="true"
-    android:dither="true"
-    android:filter="true"
-    android:gravity="fill" />
-"""
-
-RFIREFOX_THEMED_ICON_COMMENT = (
-    "    <!-- Rufox intentionally keeps its full-colour fox-R artwork when "
-    "themed icons are enabled. -->\n"
-)
+RFIREFOX_ADAPTIVE_FOREGROUND = (ICON_SOURCE_DIR / "bearium-foreground.xml").read_text()
 
 
 def patch_fenix_launcher_foreground(source: str) -> str:
-    if source == RFIREFOX_ADAPTIVE_FOREGROUND:
-        return source
-    required = ('<vector xmlns:android=', 'android:viewportWidth="108"', '<path')
-    if not all(anchor in source for anchor in required):
-        raise ValueError("Fenix launcher foreground has an unexpected format")
+    if '<vector ' not in source:
+        raise ValueError("unexpected launcher vector")
     return RFIREFOX_ADAPTIVE_FOREGROUND
 
 
 def patch_fenix_adaptive_icon(source: str) -> str:
-    if RFIREFOX_THEMED_ICON_COMMENT in source:
+    if '<adaptive-icon ' not in source or '<monochrome ' not in source:
+        raise ValueError("unexpected adaptive icon")
+    return source.replace('@color/ic_launcher_background', '@drawable/bearium_background')
+
+
+def patch_webauthn(source: str) -> str:
+    gate = '(BuildConfig.MOZILLA_OFFICIAL || "app.bearium.browser".equals(GeckoAppShell.getApplicationContext().getPackageName()))'
+    if gate in source:
         return source
-    required = (
-        "<adaptive-icon ",
-        '<foreground android:drawable="@drawable/ic_launcher_foreground"/>',
-        '<monochrome android:drawable="@drawable/ic_launcher_monochrome"/>',
-    )
-    if not all(anchor in source for anchor in required):
-        raise ValueError("Fenix adaptive launcher icon has an unexpected format")
-    return source.replace(
-        '    <monochrome android:drawable="@drawable/ic_launcher_monochrome"/>\n',
-        RFIREFOX_THEMED_ICON_COMMENT,
-        1,
-    )
+    if source.count('BuildConfig.MOZILLA_OFFICIAL') != 4:
+        raise ValueError("WebAuthn privileged-browser gates changed upstream")
+    # Google still verifies the package AND signing certificate. This selects
+    # the browser API; it does not grant provider privileges or change origins.
+    return source.replace('BuildConfig.MOZILLA_OFFICIAL', gate)
+
+
+def patch_release_manifest(source: str) -> str:
+    # Both Bearium identities are new apps, never members of Firefox's shared UID.
+    return source.replace('\n    android:sharedUserId="${sharedUserId}"', '')
+
+
+def patch_support(source: str) -> str:
+    source = source.replace('https://www.mozilla.org/firefox/android/notes',
+        'https://github.com/ISAIandCO/Bearium/releases')
+    anchor = '        val path = page.path'
+    replacement = '''        if (page == MozillaPage.PRIVACY_NOTICE || page == MozillaPage.PRIVACY_NOTICE_UPDATE || page == MozillaPage.PRIVACY_NOTICE_NEXT) {
+            return "https://github.com/ISAIandCO/Bearium/blob/main/docs/PRIVACY.md"
+        }
+        if (page == MozillaPage.TERMS_OF_SERVICE) {
+            return "https://github.com/ISAIandCO/Bearium/blob/main/docs/TERMS.md"
+        }
+        val path = page.path'''
+    return replace_once(source, anchor, replacement, "Bearium policy links")
+
+
+def rebrand_resources(source_root: Path) -> list[Path]:
+    changed = []
+    app = source_root / "mobile/android/fenix/app/src"
+    # Resource identifiers stay stable; only product text and product artwork change.
+    for variant in ("main", "release"):
+        res = app / variant / "res"
+        for path in res.glob("values*/strings.xml"):
+            source = path.read_text()
+            def brand(match):
+                key, body = match.group(1), match.group(2)
+                if key in ("onboarding_term_of_service_line_three", "onboarding_redesign_tou_body_three", "nova_onboarding_tou_body_line_3"):
+                    text = "Телеметрия и отправка отчётов о сбоях отключены в Bearium. %1$s" if path.parent.name == "values-ru" else "Telemetry and crash reporting are disabled in Bearium. %1$s"
+                    return match.group(0).replace(body, text)
+                if any(service in key.lower() for service in ("relay", "sync", "account", "mozilla", "vpn")):
+                    return match.group(0)
+                return match.group(0).replace(body, re.sub(r"\bFirefox\b", "Bearium", body))
+            patched = re.sub(r'<string[^>]*name="([^" ]+)"[^>]*>(.*?)</string>', brand, source, flags=re.S)
+            if patched != source:
+                path.write_text(patched)
+                changed.append(path.relative_to(source_root))
+        for folder in res.glob("drawable*"):
+            for name in ("ic_firefox", "expressive_firefox", "ic_splash_logo", "ic_status_logo", "ic_onboarding_welcome"):
+                path = folder / (name + ".xml")
+                if path.is_file():
+                    asset = "bearium-monochrome.xml" if name == "ic_status_logo" else "bearium-foreground.xml"
+                    content = (ICON_SOURCE_DIR / asset).read_text()
+                    if path.read_text() != content:
+                        path.write_text(content)
+                        changed.append(path.relative_to(source_root))
+    return changed
 
 
 TRANSFORMS: dict[Path, Callable[[str], str]] = {
+    Path("mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java"): patch_webauthn,
+    Path("mobile/android/fenix/app/src/release/AndroidManifest.xml"): patch_release_manifest,
+    Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SupportUtils.kt"): patch_support,
     FENIX_GRADLE: patch_fenix_gradle,
     FENIX_STRINGS: patch_fenix_strings,
     FENIX_RELEASE_STRINGS: patch_fenix_release_strings,
@@ -335,6 +391,7 @@ def patch_checkout(source_root: Path, der: bytes) -> list[Path]:
         header_path.write_text(header, encoding="utf-8")
         changed.append(GENERATED_HEADER)
     changed.extend(copy_branding_icons(source_root))
+    changed.extend(rebrand_resources(source_root))
     for relative_path, content in native_policy.generated_files().items():
         destination = source_root / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)

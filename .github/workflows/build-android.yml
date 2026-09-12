@@ -1,9 +1,14 @@
-name: Build and release Rufox for Android
+name: Build and release Bearium for Android
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_json:
+        required: true
+        type: string
   schedule:
-    # GitHub cron uses UTC. Check on five fixed dates each month. A release that
+    # GitHub cron uses UTC. Check daily. A development release that
     # already exists for the current Firefox version is skipped before the build.
     - cron: "0 23 * * *"
 
@@ -20,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      build_date: ${{ steps.source.outputs.build_date }}
       archive_url: ${{ steps.source.outputs.archive_url }}
       release_exists: ${{ steps.release.outputs.exists }}
       release_tag: ${{ steps.release.outputs.tag }}
@@ -32,7 +38,15 @@ jobs:
 
       - name: Resolve latest stable Firefox Android source
         id: source
-        run: python3 scripts/resolve_firefox_source.py --format github-output >> "$GITHUB_OUTPUT"
+        env:
+          SOURCE_JSON: ${{ inputs.source_json }}
+        run: |
+          if [[ -n "$SOURCE_JSON" ]]; then
+            python3 -c 'import json,os; [print(f"{k}={v}") for k,v in json.loads(os.environ["SOURCE_JSON"]).items()]' >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/resolve_firefox_source.py --format github-output >> "$GITHUB_OUTPUT"
+            echo "build_date=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Skip a Firefox version that was already published
         id: release
@@ -58,12 +72,12 @@ jobs:
           fi
 
   build:
-    name: Build Rufox ${{ needs.resolve.outputs.version }} (${{ matrix.abi }})
+    name: Build Bearium ${{ needs.resolve.outputs.version }} (${{ matrix.abi }})
     needs: resolve
     # Scheduled checks skip versions that are already published. A manual run
     # intentionally rebuilds the current version so broken release assets can
     # be replaced after a CI fix.
-    if: needs.resolve.outputs.release_exists != 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.resolve.outputs.release_exists != 'true' || github.event_name == 'workflow_dispatch' || inputs.source_json != ''
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
+      MOZ_BUILD_DATE: ${{ needs.resolve.outputs.build_date }}
       MOZ_OBJDIR_NAME: obj-ruthenium-${{ matrix.abi }}
       RFIREFOX_DEBUG_CERT_SHA256: d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f
       RFIREFOX_TARGET: ${{ matrix.target }}
@@ -218,7 +233,7 @@ jobs:
 
       - name: Assemble Fenix release APK with the debug key
         working-directory: ${{ runner.temp }}/firefox-source
-        # The Rufox product patch points signingConfigs.debug to the
+        # The Bearium product patch points signingConfigs.debug to the
         # RFIREFOX_DEBUG_KEYSTORE file committed in this repository.
         # A full mach build has just refreshed and staged Gecko. Tell Mozilla's
         # Gradle plugin not to start a nested `mach build faster`, which would
@@ -252,7 +267,7 @@ jobs:
 
           source_apk="${source_apks[0]}"
           upstream_name="$(basename "$source_apk" .apk)"
-          release_name="Rufox-$RELEASE_TAG-$upstream_name.apk"
+          release_name="Bearium-$RELEASE_TAG-$upstream_name.apk"
           release_apk="$artifact_dir/$release_name"
           cp -- "$source_apk" "$release_apk"
 
@@ -282,12 +297,12 @@ jobs:
             -e '/^package:/p' \
             -e '/^application-label:/p' \
             -e '/^native-code:/p'
-          if ! grep -Fq "package: name='app.ruthenium.firefox'" <<< "$badging"; then
-            echo "::error title=Unexpected APK application ID::Expected app.ruthenium.firefox."
+          if ! grep -Fq "package: name='app.bearium.browser.dev'" <<< "$badging"; then
+            echo "::error title=Unexpected APK application ID::Expected app.bearium.browser.dev."
             exit 1
           fi
-          if ! grep -Fq "application-label:'Rufox'" <<< "$badging"; then
-            echo "::error title=Unexpected APK label::Expected Rufox."
+          if ! grep -Fq "application-label:'Bearium'" <<< "$badging"; then
+            echo "::error title=Unexpected APK label::Expected Bearium."
             exit 1
           fi
           if ! grep -Fq "native-code: '$TARGET_ABI'" <<< "$badging"; then
@@ -299,15 +314,15 @@ jobs:
       - name: Upload the ${{ matrix.abi }} APK
         uses: actions/upload-artifact@v4
         with:
-          name: rufox-apk-${{ matrix.abi }}
+          name: bearium-apk-${{ matrix.abi }}
           path: artifacts-${{ matrix.abi }}/
           if-no-files-found: error
           retention-days: 2
 
   publish:
-    name: Verify and publish Rufox ${{ needs.resolve.outputs.version }}
+    name: Verify and publish Bearium ${{ needs.resolve.outputs.version }}
     needs: [resolve, build]
-    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.resolve.result == 'success' && needs.build.result == 'success' }}
+    if: ${{ always() && inputs.source_json == '' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.resolve.result == 'success' && needs.build.result == 'success' }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -318,7 +333,7 @@ jobs:
       - name: Download all ABI APKs
         uses: actions/download-artifact@v4
         with:
-          pattern: rufox-apk-*
+          pattern: bearium-apk-*
           path: artifacts/
           merge-multiple: true
 
@@ -327,7 +342,7 @@ jobs:
           expected_abis=(arm64-v8a armeabi-v7a x86_64)
           mapfile -t apks < <(find artifacts -maxdepth 1 -type f -name '*.apk' -print | sort)
           if [[ "${#apks[@]}" -ne "${#expected_abis[@]}" ]]; then
-            echo "::error title=Incomplete Rufox release::Expected ${#expected_abis[@]} APKs, found ${#apks[@]}."
+            echo "::error title=Incomplete Bearium release::Expected ${#expected_abis[@]} APKs, found ${#apks[@]}."
             printf '%s\n' "${apks[@]}"
             exit 1
           fi
@@ -337,7 +352,7 @@ jobs:
               find artifacts -maxdepth 1 -type f -name "*-$abi-release.apk" -print | sort
             )
             if [[ "${#abi_apks[@]}" -ne 1 ]]; then
-              echo "::error title=Unexpected Rufox release::Expected one $abi APK, found ${#abi_apks[@]}."
+              echo "::error title=Unexpected Bearium release::Expected one $abi APK, found ${#abi_apks[@]}."
               printf '%s\n' "${abi_apks[@]}"
               exit 1
             fi
@@ -355,12 +370,12 @@ jobs:
           RFIREFOX_DEBUG_CERT_SHA256: d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f
         run: |
           cat > artifacts/build-info.txt <<EOF
-          Product: Rufox
+          Product: Bearium
           Firefox version: $FIREFOX_VERSION
           Firefox Android tag: $FIREFOX_TAG
           Mozilla revision: $FIREFOX_REVISION
           Release tag: $RELEASE_TAG
-          Application ID: app.ruthenium.firefox
+          Application ID: app.bearium.browser.dev
           ABIs: arm64-v8a, armeabi-v7a, x86_64
           Gecko native libraries: independently built and verified for every ABI
           Signing: public repository Android debug key
@@ -371,12 +386,12 @@ jobs:
           EOF
 
           {
-            echo "Rufox $RELEASE_TAG"
+            echo "Bearium $RELEASE_TAG"
             echo
             echo "Three debug-signed installable APKs built from Mozilla tag $FIREFOX_TAG."
             echo
             echo "- Mozilla revision: $FIREFOX_REVISION"
-            echo "- Android application ID: app.ruthenium.firefox"
+            echo "- Android application ID: app.bearium.browser.dev"
             echo "- ABIs: arm64-v8a, armeabi-v7a, x86_64"
             echo "- Gecko native libraries are independently built and verified for every ABI"
             echo "- Public debug signer SHA-256: $RFIREFOX_DEBUG_CERT_SHA256"
@@ -390,7 +405,7 @@ jobs:
       - name: Upload debug-signed build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Rufox-${{ needs.resolve.outputs.release_tag }}
+          name: Bearium-${{ needs.resolve.outputs.release_tag }}
           path: |
             artifacts/*.apk
             artifacts/*.apk.sha256

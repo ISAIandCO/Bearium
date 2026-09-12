@@ -1,32 +1,22 @@
-# Rufox Android branding
+# Bearium branding
 
-The Rufox mark is a custom fox whose body and tail form the outline of an
-`R`. Orange, gold and magenta surfaces retain the visual language of Firefox,
-while the violet centre and dark ink background keep the result distinct and
-legible at launcher size. The letter is part of the illustration rather than a
-font glyph or a badge placed over another logo.
+Самостоятельный медведь с пламенем в красно-оранжевой палитре, нарисованный
+векторными контурами по мотивам предоставленного концепта. Это упрощённая
+иконка для малых размеров, а не растровая копия коллажа. Контуры Firefox
+не использованы.
 
-The WebP files under `android/` cover every launcher form used by the Fenix
-release source set:
+- `android/bearium-foreground.svg` / `.xml`: прозрачный цветной слой, viewport 108.
+- `android/bearium-background.xml`: сплошной фон, маску выбирает Android.
+- `android/bearium-monochrome.svg` / `.xml`: одноцветный силуэт для themed icons.
+- `android/bearium-*.webp`: legacy квадратные и круглые значки mdpi–xxxhdpi.
+- `android/bearium-play-512.png`: непрозрачный значок магазина, без скругления.
+- `android/bearium-store.svg`: редактируемый исходник значка магазина.
 
-- `rfirefox-<density>.webp` replaces the square legacy `ic_launcher.webp`;
-- `rfirefox-round-<density>.webp` replaces the round legacy
-  `ic_launcher_round.webp`;
-- `rfirefox-adaptive-foreground.webp` is the transparent colour foreground for
-  adaptive icons.
+Основной рисунок уменьшен и расположен в центральной безопасной области.
+Launcher не получает заранее вырезанный foreground в форме квадрата или круга.
+При проверке выпуска смотреть circle/squircle/rounded-square и themed icons
+на светлой и тёмной теме. Монохромный цвет задаёт launcher.
 
-The legacy outputs retain the upstream pixel dimensions: 48, 76, 96, 144 and
-192 px for mdpi through xxxhdpi. Lossless 512 px source renders are stored as
-`rfirefox-square-master.webp` and `rfirefox-round-master.webp`.
-
-The adaptive foreground is 432 px in `drawable-xxxhdpi`, which maps to the
-108 dp launcher canvas. Its transparent padding keeps the fox-R inside the
-adaptive safe zone while Android supplies the existing release background and
-applies the user's circle, squircle or other launcher mask.
-`scripts/patch_firefox.py` intentionally removes the default icon's
-`monochrome` reference: flattening this mark to one colour made the fox detail
-disappear and left what looked like a black `R`. Rufox therefore keeps the
-full-colour foreground even when the launcher offers themed icons.
-
-Firefox and its logo are trademarks of Mozilla Foundation. See `NOTICE.md` and
-Mozilla's trademark policy before distributing the modified assets.
+Ресурсные имена `ic_firefox` и внутренние Java namespace остаются upstream API,
+но основные продуктовые изображения заменяются патчером. Названия сторонних
+сервисов и copyright-уведомления не скрываются.

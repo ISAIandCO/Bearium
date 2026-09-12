@@ -1,0 +1,17 @@
+// BEGIN Bearium packaging
+// Keep Java namespaces and upstream license notices; only distribution identity changes.
+android.defaultConfig.with {
+    buildConfigField 'boolean', 'TELEMETRY', 'false'
+    buildConfigField 'boolean', 'CRASH_REPORTING', 'false'
+}
+if (System.getenv("BEARIUM_PRODUCTION") == "1") {
+    def code = System.getenv("BEARIUM_VERSION_CODE")
+    if (!(code ==~ /[1-9][0-9]{0,9}/) || code.toLong() > 2100000000L) {
+        throw new GradleException("BEARIUM_VERSION_CODE must be 1..2100000000")
+    }
+    androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+        variant.outputs.each { output -> output.versionCode.set(code.toInteger()) }
+    }
+
+}
+// END Bearium packaging
