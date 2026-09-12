@@ -11,6 +11,26 @@ def install(transforms, once):
         s = once(s, '    this.unregisterListener("GeckoView:GetQWACStatus");', '    RufoxProtection.detach(this.browser);\n    this.unregisterListener("GeckoView:GetRufoxProtection");\n    this.unregisterListener("GeckoView:GetQWACStatus");')
         s = once(s, '      case "GeckoView:GetQWACStatus":', '      case "GeckoView:GetRufoxProtection":\n        aCallback.onSuccess(JSON.stringify(RufoxProtection.snapshot(this.browser)));\n        break;\n      case "GeckoView:GetQWACStatus":')
         return once(s, '  onStateChange(...args) {', '  onStateChange(...args) {\n    RufoxProtection.progress(this.browser, ...args);\n    if (!(args[2] & Ci.nsIWebProgressListener.STATE_IS_NETWORK)) return;')
+    def load_error(s):
+        s = once(s, 'import { GeckoViewActorParent }',
+            'import { RufoxProtection } from "resource://gre/modules/RufoxProtection.sys.mjs";\nimport { GeckoViewActorParent }')
+        return once(s, '''        return this.eventDispatcher.sendRequestForResult(
+          "GeckoView:OnLoadError",
+          data
+        );''', '''        const browser = this.browsingContext.top.embedderElement;
+        const topLevel = !this.browsingContext.parent;
+        if (topLevel) {
+          const warning = RufoxProtection.errorPage(browser, data.uri);
+          if (warning) return warning;
+        }
+        const response = await this.eventDispatcher.sendRequestForResult(
+          "GeckoView:OnLoadError",
+          data
+        );
+        if (topLevel) RufoxProtection.retainErrorPage(browser, data.uri, response);
+        return response;''')
+    transforms[Path('mobile/shared/actors/LoadURIDelegateParent.sys.mjs')] = load_error
+
     def session(s):
         anchor = "  /**\n   * Determine if the current page uses a qualified website authentication certificate (QWAC)."
         return once(s, anchor, """  /**

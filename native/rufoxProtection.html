@@ -8,7 +8,17 @@
 <script src="chrome://global/content/rufoxLogMetadata.js" defer></script>
 <script src="chrome://global/content/rufoxProtection.js" defer></script>
 <main>
-<h1>Защита сертификатов</h1>
+<p>CAnttRUst · Rufox</p>
+<h1 id="heading">Защита сертификатов</h1>
+<p id="reason" hidden></p>
+<p id="warning-host" hidden></p>
+<p id="page-state" role="status" aria-live="polite">Получение состояния…</p>
+<div id="warning-actions" hidden>
+<button id="back" type="button">Назад</button>
+<button id="continue" type="button">Продолжить один раз</button>
+<button id="allow-domain" type="button">Разрешить этот домен</button>
+<p>«Разрешить этот домен» разрешает зону и SCT постоянно. В приватном режиме — до закрытия приватных вкладок. Срок и вид исключения можно изменить ниже.</p>
+</div>
 <p>Rufox ограничивает использование Russian Trusted Root CA российскими доменными зонами и проверяет SCT — подписи журналов прозрачности сертификатов.</p>
 <p>Если эта защита мешает открыть сайт, вы можете разрешить его. Проверка имени, срока действия, подписи и отзыва сертификата продолжит работать.</p>
 <p id="privacy"></p>
@@ -18,7 +28,6 @@
 </section>
 <section aria-labelledby="page-heading">
 <h2 id="page-heading">На этой странице</h2>
-<p id="page-state" role="status" aria-live="polite">Получение состояния…</p>
 <p id="coverage">Показаны запросы этой вкладки, для которых получен результат проверки этого УЦ. Отсутствие записей не подтверждает безопасность сайта. Подробности сохраняются для 20 последних вариантов запросов.</p>
 <div id="domains"></div>
 <button id="select-blocked">Выбрать заблокированные домены</button>
@@ -26,8 +35,10 @@
 </section>
 <h2>Разрешить выбранные сайты</h2>
 <p>Выберите домены выше или добавьте их вручную. Разрешение применяется только после нажатия кнопки.</p>
+<details><summary>Добавить домены вручную</summary>
 <label for="hosts">Сайты для исключения — по одному в строке</label>
 <textarea id="hosts" rows="4" spellcheck="false" autocomplete="off" placeholder="example.ru"></textarea>
+</details>
 <details>
 <summary>Параметры исключения</summary>
 <label for="scope">Что разрешить</label>

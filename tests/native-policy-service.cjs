@@ -59,16 +59,50 @@ const first=channel(1); begin(a,first); response(first); response(first);
 service.progress(a,{isTopLevel:true},first,2);
 assert.equal(service.snapshot(a).blocked,1,'one request must not count twice');
 assert.equal(service.snapshot(b).total,0,'tabs are isolated');
-const late=channel(1,'late.ru');Services.obs.notifyObservers(late,'http-on-modify-request');
+const late=channel(1,'late.ru');late.loadInfo.externalContentPolicyType=3;Services.obs.notifyObservers(late,'http-on-modify-request');
 const next=channel(1,'new.ru','allowed');begin(a,next);response(next);response(late);
 assert.equal(service.snapshot(a).total,1,'old responses cannot populate a new navigation');
 assert.equal(service.snapshot(a).state,'allowed');
-for(let i=0;i<105;i++) {const r=channel(1);Services.obs.notifyObservers(r,'http-on-modify-request');response(r);}
+for(let i=0;i<105;i++) {const r=channel(1);r.loadInfo.externalContentPolicyType=3;Services.obs.notifyObservers(r,'http-on-modify-request');response(r);}
 assert.equal(service.snapshot(a).badge,'99+');
 assert.equal(service.snapshot(a).blocked,105);
-const unrelated=channel(1);unrelated.securityInfo.rufoxPolicy='';
+const unrelated=channel(1);unrelated.loadInfo.externalContentPolicyType=3;unrelated.securityInfo.rufoxPolicy='';
 Services.obs.notifyObservers(unrelated,'http-on-modify-request');response(unrelated);
 assert.equal(service.snapshot(a).total,106,'unrelated certificates are absent');
+// Real document loads use targetBrowsingContextID, with no loading context ID.
+const failed=channel(0,'blocked.com');failed.loadInfo.targetBrowsingContextID=1;
+Services.obs.notifyObservers(failed,'http-on-modify-request');
+Services.obs.notifyObservers(failed,'http-on-rufox-request');
+Services.obs.notifyObservers(failed,'http-on-rufox-security-info');
+assert.equal(service.snapshot(a).blocked,1);
+assert.equal(service.snapshot(a).blockedDomains,1);
+assert.equal(service.errorPage(a,failed.URI.spec),'about:rufox-protection#warning=1&url='+encodeURIComponent(failed.URI.spec));
+assert.equal(service.errorPage(b,failed.URI.spec),null,'another tab cannot reuse a report');
+assert.equal(service.errorPage(a,'https://different.com/'),null);
+// DocumentChannel progress arrives after the parent HttpChannel report.
+const documentChannel=channel(1,'blocked.com');documentChannel.securityInfo.rufoxPolicy='';
+begin(a,documentChannel);
+assert.equal(service.snapshot(a).blocked,1,'late progress must not erase early TLS report');
+const errorDocument=channel(1);errorDocument.URI={spec:'about:rufox-protection#warning=1',schemeIs:()=>false};
+begin(a,errorDocument);
+assert.equal(service.snapshot(a).blocked,1,'warning document preserves the failed page');
+Services.obs.notifyObservers(failed,'http-on-failed-opening-request');
+assert.equal(service.snapshot(a).blocked,1,'multiple failure notifications count once');
+// Reloading the same URL resets counters even when progress precedes HTTP.
+const reload=channel(1,'blocked.com');begin(a,reload);
+Services.obs.notifyObservers(reload,'http-on-modify-request');
+assert.equal(service.snapshot(a).total,0);
+Services.obs.notifyObservers(reload,'http-on-rufox-security-info');
+assert.equal(service.snapshot(a).blocked,1);
+// Generic TLS errors remain generic, but cannot be advertised as zero detections.
+const generic=channel(1,'other.com');generic.securityInfo.rufoxPolicy='';
+Services.obs.notifyObservers(generic,'http-on-modify-request');
+assert.equal(service.errorPage(a,generic.URI.spec),null);
+service.retainErrorPage(a,generic.URI.spec,'data:text/html,fenix-error');
+errorDocument.URI.spec='data:text/html,fenix-error';begin(a,errorDocument);
+assert.equal(service.snapshot(a).state,'unavailable');
+errorDocument.URI.spec='data:text/html,unrelated';begin(a,errorDocument);
+assert.equal(service.snapshot(a).state,'unobserved','unrelated internal navigation clears diagnostics');
 normal.set('security.rufox.exceptions','example.ru|all|101,keep.ru|ct');
 Services.obs.notifyObservers(null,'wake_notification');
 function runDue() {

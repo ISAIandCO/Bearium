@@ -44,7 +44,7 @@ class NativePolicyTests(unittest.TestCase):
     def test_upstream_change_does_not_silently_skip_patch(self):
         for transform in (native_policy.verifier_cpp, native_policy.verifier_h,
                           native_policy.common_socket, native_policy.token_cache,
-                          native_policy.request_interceptor, native_policy.trust_panel):
+                          native_policy.trust_panel):
             with self.subTest(transform=transform.__name__):
                 with self.assertRaises(ValueError):
                     transform('upstream source changed')

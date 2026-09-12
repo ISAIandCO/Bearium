@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-function page(privateMode = false, target = 'https://EXAMPLE.ru/a') {
+function page(privateMode = false, target = 'https://EXAMPLE.ru/a', report = null) {
   const normal = new Map(), defaults = new Map(), observers = new Map();
   let cancelled = 0, oneShots = 0, navigations = 0;
   function branch(map) {
@@ -26,11 +26,11 @@ function page(privateMode = false, target = 'https://EXAMPLE.ru/a') {
       removeObserver: (_, topic) => observers.delete(topic),
       notifyObservers: (_, topic) => {if (topic === 'net:cancel-all-connections') cancelled++;}}};
   vm.runInNewContext(fs.readFileSync('native/rufoxProtection.js','utf8'), {
-    ChromeUtils: {importESModule: () => ({PrivateBrowsingUtils: {isContentWindowPrivate: () => privateMode}, RufoxProtection: {armOneShot() {oneShots++;}, cancelOneShot() {}, snapshot: () => ({available:true, total:0, blocked:0, domains:[]})}})},
+    ChromeUtils: {importESModule: () => ({PrivateBrowsingUtils: {isContentWindowPrivate: () => privateMode}, RufoxProtection: {armOneShot() {oneShots++;}, cancelOneShot() {}, snapshot: () => report || ({available:true, total:0, blocked:0, domains:[]})}})},
     RufoxLogMetadata: {version:'test',timestamp:'2026-01-01',logs:{}},
     setInterval: () => 1, clearInterval() {},
-    Services, window: {addEventListener() {}, browsingContext: {top: {embedderElement:{}}}}, URLSearchParams, location: {hash:'#url='+encodeURIComponent(target),replace() {navigations++;}},
-    document: {getElementById:get, createElement:element, createTextNode:v=>v},
+    Services, window: {addEventListener() {}, browsingContext: {top: {embedderElement:{}}}}, URL, URLSearchParams, location: {hash:'#'+(report?'warning=1&':'')+'url='+encodeURIComponent(target),replace() {navigations++;}},
+    document: {documentURI:"about:rufox-protection#"+(report?"warning=1&":"")+"url="+encodeURIComponent(target), getElementById:get, createElement:element, createTextNode:v=>v},
   });
   return {get, normal, defaults, observers, cancelled:()=>cancelled, oneShots:()=>oneShots, navigations:()=>navigations,
     click(trusted=true) {get('allow').handlers.click({isTrusted:trusted});}};
@@ -62,3 +62,17 @@ assert.equal(priv.defaults.get('security.rufox.private_exceptions'), 'example.ru
 const malicious = page(false, 'javascript:alert(1)');
 assert.equal(malicious.get('return').hidden, true);
 console.log('Native policy UI checks passed');
+
+const warning = page(false, 'https://blocked.com/', {
+  available:true, url:'https://blocked.com/', total:1, blocked:1, blockedDomains:1, domains:[],
+  mainReport:{state:'blocked',zoneAllowed:false,zoneException:false},
+});
+assert.equal(warning.get('warning-actions').hidden,false);
+assert.match(warning.get('reason').textContent,/вне разрешённых зон/);
+assert.match(warning.get('page-state').textContent,/Заблокировано запросов: 1. Доменов: 1/);
+warning.get('allow-domain').handlers.click({isTrusted:false});
+assert.equal(warning.normal.size,0);
+warning.get('allow-domain').handlers.click({isTrusted:true});
+assert.equal(warning.normal.get('security.rufox.exceptions'),'blocked.com|all');
+warning.get('continue').handlers.click({isTrusted:true});
+assert.equal(warning.oneShots(),1);
