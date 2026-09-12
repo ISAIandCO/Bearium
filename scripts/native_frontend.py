@@ -25,7 +25,7 @@ def install(transforms, once):
 
 """ + anchor)
     transforms[Path('mobile/shared/modules/geckoview/GeckoViewProgress.sys.mjs')] = progress
-    transforms[Path('mobile/shared/modules/geckoview/moz.build')] = lambda s: once(s, 'EXTRA_JS_MODULES += [', 'EXTRA_JS_MODULES += [\n    "RufoxProtection.sys.mjs",')
+    transforms[Path('mobile/shared/modules/geckoview/moz.build')] = lambda s: once(s, '    "Messaging.sys.mjs",', '    "Messaging.sys.mjs",\n    "RufoxProtection.sys.mjs",')
     transforms[Path('mobile/android/geckoview/src/main/java/org/mozilla/geckoview/GeckoSession.java')] = session
 
     def engine(s):

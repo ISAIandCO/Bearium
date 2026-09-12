@@ -1,3 +1,4 @@
+import ast
 import base64
 import hashlib
 import json
@@ -5,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from scripts import native_policy, patch_firefox
@@ -58,3 +60,17 @@ class NativePolicyTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node.js required for service checks')
     def test_tab_diagnostics_and_permission_expiry(self):
         subprocess.run(['node', 'tests/native-policy-service.cjs'], cwd=native_policy.ROOT, check=True)
+
+    def test_geckoview_module_registration_stays_sorted(self):
+        source = 'EXTRA_JS_MODULES += [\n' + ''.join(
+            f'    "{name}.sys.mjs",\n' for name in
+            ('BrowserUsageTelemetry', 'GeckoViewActorChild', 'GeckoViewAIFeatures',
+             'LoadURIDelegate', 'MediaUtils', 'Messaging')
+        ) + ']\n'
+        transform = patch_firefox.TRANSFORMS[
+            Path('mobile/shared/modules/geckoview/moz.build')]
+        result = transform(source)
+        names = ast.literal_eval(ast.parse(result).body[0].value)
+        self.assertEqual(names, sorted(names, key=str.lower))
+        self.assertEqual(names.count('RufoxProtection.sys.mjs'), 1)
+        self.assertEqual(transform(result), result)
