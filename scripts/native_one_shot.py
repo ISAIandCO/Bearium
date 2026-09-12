@@ -16,22 +16,22 @@ def transform(path, s, once):
         edit('    [must_use] attribute unsigned long tlsFlags;', '''    [must_use] attribute unsigned long tlsFlags;
 
     /** Browser chrome only: permit this top-level HTTPS request under Rufox CA policy. */
-    [must_use] void grantRufoxOneShot();''')
+    [must_use, implicit_jscontext] void grantRufoxOneShot();''')
     elif name == 'HttpBaseChannel.h':
         edit('  NS_IMETHOD SetTlsFlags(uint32_t aTlsFlags) override;', '''  NS_IMETHOD SetTlsFlags(uint32_t aTlsFlags) override;
-  NS_IMETHOD GrantRufoxOneShot() override;''')
+  NS_IMETHOD GrantRufoxOneShot(JSContext* aCx) override;''')
         edit('  uint32_t mTlsFlags{0};', '''  uint32_t mTlsFlags{0};
   // Intentionally absent from redirect/replacement and child IPC serialization.
   bool mRufoxOneShot = false;''')
     elif name == 'HttpBaseChannel.cpp':
         edit('#include "nsContentUtils.h"', '#include "nsContentUtils.h"\n#include "nsXULAppAPI.h"')
         edit('  mTlsFlags = aTlsFlags;', f'  mTlsFlags = aTlsFlags & ~{BIT};')
-        edit('HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {', '''HttpBaseChannel::GrantRufoxOneShot() {
-  if (!XRE_IsParentProcess() || !nsContentUtils::IsSystemCaller()) {
+        edit('HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {', '''HttpBaseChannel::GrantRufoxOneShot(JSContext* aCx) {
+  if (!aCx || !XRE_IsParentProcess() || !nsContentUtils::IsSystemCaller(aCx)) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
   if (!mURI || !mURI->SchemeIs("https") || mConnectionInfo ||
-      mLoadInfo->GetExternalContentPolicyType() != nsIContentPolicy::TYPE_DOCUMENT) {
+      mLoadInfo->GetExternalContentPolicyType() != ExtContentPolicy::TYPE_DOCUMENT) {
     return NS_ERROR_NOT_AVAILABLE;
   }
   mRufoxOneShot = true;
