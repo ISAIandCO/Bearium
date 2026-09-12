@@ -21,7 +21,22 @@ def install(transforms, once):
         const topLevel = !this.browsingContext.parent;
         if (topLevel) {
           const warning = RufoxProtection.errorPage(browser, data.uri);
-          if (warning) return warning;
+          if (warning) {
+            // Never return a parent-only about URI to the content process:
+            // nsDocShellLoadState rejects such loads as an IPDL protocol error.
+            Services.tm.dispatchToMainThread(() => {
+              if (!browser.isConnected ||
+                  RufoxProtection.errorPage(browser, data.uri) !== warning) return;
+              browser.loadURI(Services.io.newURI(warning), {
+                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+                loadFlags: Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY |
+                  Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_LOAD_URI_DELEGATE,
+              });
+            });
+            // LoadURIDelegate.handleLoadError handles a rejected query by setting
+            // NS_ERROR_ABORT, so the old docshell does not load a fallback error.
+            throw Components.Exception("Rufox warning handled by browser chrome", Cr.NS_ERROR_ABORT);
+          }
         }
         const response = await this.eventDispatcher.sendRequestForResult(
           "GeckoView:OnLoadError",
