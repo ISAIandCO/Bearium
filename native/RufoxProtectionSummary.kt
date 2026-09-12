@@ -35,7 +35,8 @@ internal fun RufoxProtectionSummary(engine: EngineSession?, onOpen: () -> Unit) 
                         summary = try {
                             val status = JSONObject(raw ?: "{}")
                             when (status.optString("state")) {
-                                "blocked" -> "Заблокировано запросов: ${status.optString("badge")}"
+                                "blocked" -> "Заблокировано запросов: ${status.optInt("blocked")}. " +
+                                    "Доменов: ${if (status.optBoolean("truncated")) "не менее " else ""}${status.optInt("blockedDomains")}"
                                 "exception" -> "Действует пользовательское разрешение"
                                 "allowed" -> if (status.optString("badge") == "CT") {
                                     "CT · SCT страницы проверен"

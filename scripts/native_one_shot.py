@@ -42,6 +42,13 @@ def transform(path, s, once):
 NS_IMETHODIMP
 HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {''')
     elif name == 'nsHttpChannel.cpp':
+        edit('      mSecurityInfo = mTransaction->SecurityInfo();', '''      mSecurityInfo = mTransaction->SecurityInfo();
+      // Report failed handshakes before listeners request an error document.
+      // Response observers alone do not cover TLS failures.
+      if (nsCOMPtr<nsIObserverService> observers = services::GetObserverService()) {
+        observers->NotifyObservers(static_cast<nsIHttpChannel*>(this),
+                                   "http-on-rufox-security-info", nullptr);
+      }''')
         edit('  // Construct connection info object', '''  // Notify before choosing an Alt-Svc route, cache policy or connection pool.
   if (nsCOMPtr<nsIObserverService> observers = services::GetObserverService()) {
     observers->NotifyObservers(static_cast<nsIHttpChannel*>(this),

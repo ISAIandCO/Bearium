@@ -12,6 +12,11 @@ const selected = new Set();
 let snapshot = { domains: [] };
 let lastSnapshot = "";
 let returnURL = null;
+let warningHost = null;
+// An error document keeps the failed URL in window.location. Read parameters
+// from the actual internal document URI, as Firefox's own error pages do.
+const parameters = new URLSearchParams(new URL(document.documentURI).hash.slice(1));
+const warningMode = parameters.get("warning") === "1";
 const sources = privateMode ? [[memory, privatePref, "приватный сеанс"]] :
   [[memory, sessionPref, "сеанс"], [Services.prefs, regularPref, "постоянно"]];
 function entries(branch, pref) {
@@ -88,7 +93,7 @@ function refreshPage() {
   lastSnapshot = serialized;
   $("page-state").textContent = !snapshot.available ? "Состояние исходной вкладки недоступно. Можно разрешить сайт вручную." :
     snapshot.state === "unavailable" ? "Нет результата проверки сертификата страницы. Причину общей ошибки соединения смотрите на странице ошибки." :
-    snapshot.total ? `Запросов с этим УЦ: ${snapshot.total}. Заблокировано: ${snapshot.blocked}.` : "Запросов с результатом проверки этого УЦ не обнаружено.";
+    snapshot.total ? `Заблокировано запросов: ${snapshot.blocked}. Доменов: ${snapshot.truncated ? "не менее " : ""}${snapshot.blockedDomains}. Всего запросов с этим УЦ: ${snapshot.total}.` : "Запросов с результатом проверки этого УЦ не обнаружено.";
   if (snapshot.truncated) $("page-state").textContent += " Список ограничен 1000 доменами; счётчик продолжает учитывать запросы.";
   $("domains").replaceChildren();
   for (const domain of snapshot.domains) {
@@ -117,7 +122,7 @@ $("clear-selection").addEventListener("click", event => {
   if (!event.isTrusted) return;
   selected.clear(); updateSelection();
 });
-$("open-once").addEventListener("click", event => {
+function openOnce(event) {
   if (!event.isTrusted || !returnURL) return;
   const browser = window.browsingContext.top.embedderElement;
   try {
@@ -127,11 +132,13 @@ $("open-once").addEventListener("click", event => {
     RufoxProtection.cancelOneShot(browser);
     $("status").textContent = error.message;
   }
-});
-$("allow").addEventListener("click", event => {
+}
+$("open-once").addEventListener("click", openOnce);
+$("continue").addEventListener("click", openOnce);
+function allowHosts(event, requestedHosts) {
   if (!event.isTrusted) return;
   try {
-    const hosts = new Set([...selected, ...$("hosts").value.split(/\s+/).filter(Boolean)].map(normalize));
+    const hosts = new Set(requestedHosts.map(normalize));
     if (!hosts.size) throw new Error("Выберите или укажите хотя бы один сайт.");
     const scope = $("scope").value;
     if (!["zone", "ct", "all"].includes(scope)) throw new Error("Некорректное разрешение.");
@@ -146,6 +153,14 @@ $("allow").addEventListener("click", event => {
     $("status").textContent = "Разрешение сохранено. Вернитесь на сайт для новой проверки.";
     if (returnURL && $("reload").checked) location.replace(returnURL);
   } catch (error) { $("status").textContent = error.message; }
+}
+$("allow").addEventListener("click", event =>
+  allowHosts(event, [...selected, ...$("hosts").value.split(/\s+/).filter(Boolean)]));
+$("allow-domain").addEventListener("click", event => {
+  if (warningHost) allowHosts(event, [warningHost]);
+});
+$("back").addEventListener("click", event => {
+  if (event.isTrusted) { if (history.length > 1) history.back(); else window.close(); }
 });
 $("hardened").checked = Services.prefs.getBoolPref("security.rufox.hardened", false);
 $("hardened").addEventListener("change", event => {
@@ -164,7 +179,7 @@ if (privateMode) {
 $("log-version").textContent = `Встроенный список ${RufoxLogMetadata.version}, обновлён ${RufoxLogMetadata.timestamp}. Обновляется вместе с браузером.`;
 for (const log of Object.values(RufoxLogMetadata.logs)) node("li", `${log.name} · ${log.state} · срок окончания сертификата: ${log.interval.start_inclusive} — ${log.interval.end_exclusive} (не включая конец)`, $("logs"));
 try {
-  const target = new URLSearchParams(location.hash.slice(1)).get("url");
+  const target = parameters.get("url");
   if (target) {
     const host = normalize(target);
     const uri = Services.io.newURI(target);
@@ -174,7 +189,24 @@ try {
       selected.add(host); updateSelection();
     }
     returnURL = uri.spec;
-    $("one-shot").hidden = false;
+    $("one-shot").hidden = warningMode;
+    if (warningMode) {
+      const report = snapshot.mainReport;
+      const valid = snapshot.url === uri.spec && report?.state === "blocked";
+      $("heading").textContent = "Соединение заблокировано политикой сертификатов";
+      $("reason").hidden = false;
+      if (valid) {
+        warningHost = host;
+        $("warning-host").textContent = host;
+        $("warning-host").hidden = false;
+        $("reason").textContent = !report.zoneAllowed && !report.zoneException
+          ? "Сайт использует Russian Trusted Root CA вне разрешённых зон .ru, .su и .рф. Вы можете продолжить по своему решению."
+          : "Сайт использует Russian Trusted Root CA, но проверка SCT не пройдена: " + (reasons[report.ctReason] || "нет подходящих подписей журналов") + ". Вы можете продолжить по своему решению.";
+        $("warning-actions").hidden = false;
+      } else {
+        $("reason").textContent = "Сведения о блокировке недоступны. Повторите переход на сайт для новой проверки.";
+      }
+    }
     $("return").href = uri.spec; $("return").hidden = false;
   }
 } catch (_) { /* Manual controls remain available without an originating URL. */ }

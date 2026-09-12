@@ -11,3 +11,8 @@ section { border-block-end: 1px solid GrayText; padding-block: .5rem; }
 input[type=checkbox] { width: 1.2rem; height: 1.2rem; vertical-align: middle; margin-right: .4rem; }
 summary { cursor: pointer; padding-block: .75rem; }
 details p { overflow-wrap: anywhere; font-size: .9rem; }
+
+#warning-host { font-weight: 700; overflow-wrap: anywhere; }
+#page-state { padding: .75rem; border: 1px solid GrayText; border-radius: .5rem; }
+#warning-actions button { display: block; width: 100%; }
+#continue, #allow-domain { background: #7542e5; color: white; border: 0; border-radius: .4rem; }

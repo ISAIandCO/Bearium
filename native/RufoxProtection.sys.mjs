@@ -1,7 +1,7 @@
 /* MPL-2.0. Parent-process, per-tab diagnostics. No browsing history on disk. */
 import { setTimeout, clearTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
-const TOPICS = ["http-on-rufox-request", "http-on-modify-request", "http-on-examine-response",
+const TOPICS = ["http-on-rufox-request", "http-on-rufox-security-info", "http-on-modify-request", "http-on-examine-response",
   "http-on-examine-cached-response", "http-on-examine-merged-response",
   "http-on-failed-opening-request"];
 const tabs = new Map();
@@ -57,7 +57,7 @@ function fresh() {
 }
 function tabFor(channel) {
   const info = channel.loadInfo;
-  const context = BrowsingContext.get(info.browsingContextID || info.topBrowsingContextID);
+  const context = BrowsingContext.get(info.targetBrowsingContextID || info.browsingContextID || info.associatedBrowsingContextID);
   const browser = context?.top?.embedderElement;
   return tabs.get(browser);
 }
@@ -78,6 +78,16 @@ function consumeOneShot(channel, tab) {
     Boolean(info.originAttributes.privateBrowsingId) === grant.privateMode;
   clearOneShot(tab);
   if (matches) channel.QueryInterface(Ci.nsIHttpChannelInternal).grantRufoxOneShot();
+}
+function begin(channel, tab) {
+  if (bindings.get(channel)?.started) return;
+  if (channel.loadInfo.externalContentPolicyType === Ci.nsIContentPolicy.TYPE_DOCUMENT) {
+    tab.page = fresh();
+    tab.page.url = channel.URI.spec;
+    bindings.delete(channel);
+  }
+  bind(channel, tab);
+  bindings.get(channel).started = true;
 }
 function bind(channel, tab) {
   if (!bindings.has(channel)) bindings.set(channel, { tab, page: tab.page, seen: false });
@@ -127,10 +137,12 @@ const observer = {
     try {
       const channel = subject.QueryInterface(Ci.nsIHttpChannel);
       if (topic === "http-on-rufox-request") {
-        consumeOneShot(channel, tabFor(channel));
+        const tab = tabFor(channel);
+        consumeOneShot(channel, tab);
+        if (tab) begin(channel, tab);
       } else if (topic === "http-on-modify-request") {
         const tab = tabFor(channel);
-        if (tab) bind(channel, tab);
+        if (tab) begin(channel, tab);
       } else {
         // Never attach a late response to whichever page happens to be current.
         // Cached requests are bound by the progress listener at STATE_START.
@@ -140,6 +152,19 @@ const observer = {
   },
 };
 export const RufoxProtection = {
+  errorPage(browser, target) {
+    const page = tabs.get(browser)?.page;
+    if (!page || page.url !== target) return null;
+    if (page.mainReport?.state === "blocked") {
+      return "about:rufox-protection#warning=1&url=" + encodeURIComponent(target);
+    }
+    page.unavailable = true;
+    return null;
+  },
+  retainErrorPage(browser, target, uri) {
+    const page = tabs.get(browser)?.page;
+    if (page?.url === target && uri) page.errorURI = uri;
+  },
   armOneShot(browser, target, privateMode) {
     const tab = tabs.get(browser);
     if (!tab) throw new Error("Исходная вкладка уже закрыта.");
@@ -183,7 +208,8 @@ export const RufoxProtection = {
       // Only our controls and certificate error pages retain the originating page.
       if (!channel.URI.schemeIs("http") && !channel.URI.schemeIs("https")) {
         if (progress.isTopLevel && (flags & W.STATE_START) && (flags & W.STATE_IS_NETWORK) &&
-            !/^(about:(rufox-protection|neterror|certerror)([?#]|$))/.test(channel.URI.spec)) {
+            channel.URI.spec !== tab.page.errorURI &&
+            !/^(about:(rufox-protection|neterror|certerror)([?#]|$)|chrome:\/\/global\/content\/rufoxProtection.html)/.test(channel.URI.spec)) {
           clearOneShot(tab);
           tab.page = fresh();
         }
@@ -191,9 +217,12 @@ export const RufoxProtection = {
       }
       if (progress.isTopLevel && (flags & W.STATE_START) && (flags & W.STATE_IS_NETWORK)) {
         if (tab.oneShot && channel.URI.specIgnoringRef !== tab.oneShot.url) clearOneShot(tab);
-        tab.page = fresh();
-        tab.page.url = channel.URI.spec;
-        bindings.delete(channel);
+        // The parent HTTP observer can run before the DocumentChannel progress
+        // notification. Do not discard its report when that notification arrives.
+        if (tab.page.url !== channel.URI.spec) {
+          tab.page = fresh();
+          tab.page.url = channel.URI.spec;
+        }
       }
       if (flags & W.STATE_START) bind(channel, tab);
       if (flags & W.STATE_STOP) {
@@ -207,6 +236,8 @@ export const RufoxProtection = {
     const page = tabs.get(browser)?.page;
     if (!page) return { available: false, domains: [], blocked: 0, total: 0 };
     return { available: true, url: page.url, blocked: page.blocked,
+      blockedDomains: [...page.domains.values()].filter(d => d.blocked).length,
+      domainCount: page.domains.size, mainReport: page.mainReport,
       badge: page.blocked > 99 ? "99+" : page.blocked ? String(page.blocked) :
         page.unavailable ? "?" : page.mainReport?.ctReason === "verified" ? "CT" : "", total: page.total,
       truncated: page.truncated,

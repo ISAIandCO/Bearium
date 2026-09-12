@@ -196,31 +196,6 @@ def trust_panel(source):
                         Route.TrackersPanel -> {""")
 
 
-def request_interceptor(source):
-    source = once(source, "        interceptErrorPageAction(uri)?.let { return it }", """        if (uri.startsWith("rufox-protection:") && hasUserGesture && !isSubframeRequest) {
-            val target = uri.removePrefix("rufox-protection:")
-            return RequestInterceptor.InterceptionResponse.Url(
-                "about:rufox-protection#url=" + android.net.Uri.encode(target),
-            )
-        }
-        interceptErrorPageAction(uri)?.let { return it }""")
-    return once(source, "            descriptionOverride = { type -> getErrorPageDescription(context, type) },", """            descriptionOverride = { type ->
-                if (uri?.startsWith("https://") == true && type in listOf(
-                    ErrorType.ERROR_SECURITY_BAD_CERT, ErrorType.ERROR_SECURITY_SSL,
-                    ErrorType.ERROR_BAD_HSTS_CERT,
-                )) {
-                    val target = android.text.TextUtils.htmlEncode(uri)
-                    "Проверка безопасного соединения не пройдена. " +
-                        "Если отказ связан с политикой Russian Trusted Root CA, " +
-                        "вы можете разрешить сайт в " +
-                        "<a href=\\\"rufox-protection:$target\\\">защите сертификатов Rufox</a>. " +
-                        "Другие ошибки сертификата это разрешение не отменяет."
-                } else {
-                    getErrorPageDescription(context, type)
-                }
-            },""")
-
-
 def common_socket(source):
     source = once(source, '#include "CommonSocketControl.h"', '#include "CommonSocketControl.h"\n#include "RutheniumRoot.h"\n#include <cstring>')
     return once(source, "  // See where CheckCertHostname() is called in", """  // Rufox: an exception for one host must not authorize another SAN via H2/H3.
@@ -270,7 +245,6 @@ def install(transforms):
     transforms[Path("docshell/build/components.conf")] = about_components
     transforms[Path("toolkit/content/jar.mn")] = jar
     transforms[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/trustpanel/TrustPanelFragment.kt")] = trust_panel
-    transforms[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/AppRequestInterceptor.kt")] = request_interceptor
     transforms[Path("security/manager/ssl/CommonSocketControl.cpp")] = common_socket
     transforms[Path("netwerk/base/SSLTokensCache.cpp")] = token_cache
     transforms[Path("security/certverifier/moz.build")] = cert_build
