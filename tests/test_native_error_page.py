@@ -19,7 +19,7 @@ class ErrorPageTests(unittest.TestCase):
         program = '''
 const assert = require('node:assert/strict');
 class GeckoViewActorParent {}
-let warning = 'about:rufox-protection#warning=1', calls = 0, retained = 0;
+let warning = 'about:bearium-protection#warning=1', calls = 0, retained = 0;
 const pending = [], loads = [], principal = {};
 const browser = {isConnected:true, loadURI(uri, options) {loads.push({uri,options});}};
 const Cr = {NS_ERROR_ABORT:123};

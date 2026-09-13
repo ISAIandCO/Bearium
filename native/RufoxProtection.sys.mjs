@@ -156,7 +156,7 @@ export const RufoxProtection = {
     const page = tabs.get(browser)?.page;
     if (!page || page.url !== target) return null;
     if (page.mainReport?.state === "blocked") {
-      return "about:rufox-protection#warning=1&url=" + encodeURIComponent(target);
+      return "about:bearium-protection#warning=1&url=" + encodeURIComponent(target);
     }
     page.unavailable = true;
     return null;
@@ -209,7 +209,7 @@ export const RufoxProtection = {
       if (!channel.URI.schemeIs("http") && !channel.URI.schemeIs("https")) {
         if (progress.isTopLevel && (flags & W.STATE_START) && (flags & W.STATE_IS_NETWORK) &&
             channel.URI.spec !== tab.page.errorURI &&
-            !/^(about:(rufox-protection|neterror|certerror)([?#]|$)|chrome:\/\/global\/content\/rufoxProtection.html)/.test(channel.URI.spec)) {
+            !/^(about:(bearium-protection|neterror|certerror)([?#]|$)|chrome:\/\/global\/content\/rufoxProtection.html)/.test(channel.URI.spec)) {
           clearOneShot(tab);
           tab.page = fresh();
         }

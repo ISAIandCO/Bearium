@@ -160,12 +160,12 @@ def nss_component(source: str) -> str:
 
 def about_redirector(source):
     return once(source, '    {"about", "chrome://global/content/aboutAbout.html", 0},', '''    {"about", "chrome://global/content/aboutAbout.html", 0},
-    {"rufox-protection", "chrome://global/content/rufoxProtection.html",
+    {"bearium-protection", "chrome://global/content/rufoxProtection.html",
      nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI},''')
 
 
 def about_components(source):
-    return once(source, "about_pages = [", "about_pages = [\n    'rufox-protection',")
+    return once(source, "about_pages = [", "about_pages = [\n    'bearium-protection',")
 
 
 def jar(source):
@@ -182,7 +182,7 @@ def trust_panel(source):
                                 engine = sessionState?.engineState?.engineSession,
                                 onOpen = {
                                 components.useCases.sessionUseCases.loadUrl(
-                                    "about:rufox-protection#url=" + Uri.encode(args.url),
+                                    "about:bearium-protection#url=" + Uri.encode(args.url),
                                     sessionId = args.sessionId,
                                 )
                                 dismiss()

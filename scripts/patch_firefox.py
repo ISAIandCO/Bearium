@@ -335,6 +335,11 @@ def patch_support(source: str) -> str:
     return replace_once(source, anchor, replacement, "Bearium policy links")
 
 
+def patch_about_layout(source: str) -> str:
+    return replace_once(source, 'app:srcCompat="?fenixLogo"',
+        'app:srcCompat="@drawable/bearium_artwork"', "Bearium about logo")
+
+
 def rebrand_resources(source_root: Path) -> list[Path]:
     changed = []
     app = source_root / "mobile/android/fenix/app/src"
@@ -345,12 +350,15 @@ def rebrand_resources(source_root: Path) -> list[Path]:
             source = path.read_text()
             def brand(match):
                 key, body = match.group(1), match.group(2)
+                if key == "about_content":
+                    text = "%1$s — независимый браузер на основе кода Mozilla." if path.parent.name == "values-ru" else "%1$s is an independent browser based on Mozilla code."
+                    return match.group(0).replace(body, text)
                 if key in ("onboarding_term_of_service_line_three", "onboarding_redesign_tou_body_three", "nova_onboarding_tou_body_line_3"):
                     text = "Телеметрия и отправка отчётов о сбоях отключены в Bearium. %1$s" if path.parent.name == "values-ru" else "Telemetry and crash reporting are disabled in Bearium. %1$s"
                     return match.group(0).replace(body, text)
                 if any(service in key.lower() for service in ("relay", "sync", "account", "mozilla", "vpn")):
                     return match.group(0)
-                return match.group(0).replace(body, re.sub(r"\bFirefox\b", "Bearium", body))
+                return match.group(0).replace(body, re.sub(r"\b(?:Firefox|Rufox|RFirefox)\b", "Bearium", body))
             patched = re.sub(r'<string[^>]*name="([^" ]+)"[^>]*>(.*?)</string>', brand, source, flags=re.S)
             if patched != source:
                 path.write_text(patched)
@@ -382,6 +390,7 @@ def rebrand_resources(source_root: Path) -> list[Path]:
 
 
 TRANSFORMS: dict[Path, Callable[[str], str]] = {
+    Path("mobile/android/fenix/app/src/main/res/layout/fragment_about.xml"): patch_about_layout,
     Path("mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java"): patch_webauthn,
     Path("mobile/android/fenix/app/src/release/AndroidManifest.xml"): patch_release_manifest,
     Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/settings/SupportUtils.kt"): patch_support,

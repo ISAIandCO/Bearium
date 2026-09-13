@@ -17,6 +17,13 @@ let warningHost = null;
 // from the actual internal document URI, as Firefox's own error pages do.
 const parameters = new URLSearchParams(new URL(document.documentURI).hash.slice(1));
 const warningMode = parameters.get("warning") === "1";
+$("management").hidden = warningMode;
+$("page-state").hidden = warningMode;
+$("main").className = warningMode ? "warning" : "";
+if (warningMode) document.title = "Сайт заблокирован · Bearium";
+$("warning-lifetime").textContent = privateMode
+  ? "«Разрешить этот домен» — до закрытия всех приватных вкладок."
+  : "«Разрешить этот домен» — запомнить выбор для этого сайта. Отменить его можно в настройках защиты.";
 const sources = privateMode ? [[memory, privatePref, "приватный сеанс"]] :
   [[memory, sessionPref, "сеанс"], [Services.prefs, regularPref, "постоянно"]];
 function entries(branch, pref) {
@@ -190,18 +197,24 @@ try {
     }
     returnURL = uri.spec;
     $("one-shot").hidden = warningMode;
+    $("manage").href = "about:bearium-protection#url=" + encodeURIComponent(uri.spec);
+    $("manage").hidden = !warningMode;
     if (warningMode) {
       const report = snapshot.mainReport;
       const valid = snapshot.url === uri.spec && report?.state === "blocked";
-      $("heading").textContent = "Соединение заблокировано политикой сертификатов";
+      $("heading").textContent = "Сайт заблокирован";
       $("reason").hidden = false;
       if (valid) {
         warningHost = host;
         $("warning-host").textContent = host;
         $("warning-host").hidden = false;
-        $("reason").textContent = !report.zoneAllowed && !report.zoneException
-          ? "Сайт использует Russian Trusted Root CA вне разрешённых зон .ru, .su и .рф. Вы можете продолжить по своему решению."
-          : "Сайт использует Russian Trusted Root CA, но проверка SCT не пройдена: " + (reasons[report.ctReason] || "нет подходящих подписей журналов") + ". Вы можете продолжить по своему решению.";
+        const outsideZone = !report.zoneAllowed && !report.zoneException;
+        $("reason").textContent = outsideZone
+          ? "Сертификат сайта выдан российским удостоверяющим центром, хотя адрес сайта не относится к российским доменам. Bearium остановил соединение для вашей защиты."
+          : "Сертификат сайта не прошёл дополнительную проверку Bearium. Соединение остановлено для вашей защиты.";
+        $("warning-detail").textContent = outsideZone
+          ? "Сайт использует Russian Trusted Root CA вне разрешённых зон .ru, .su и .рф."
+          : "Сайт использует Russian Trusted Root CA. Проверка SCT: " + (reasons[report.ctReason] || "нет подходящих подписей журналов") + ".";
         $("warning-actions").hidden = false;
       } else {
         $("reason").textContent = "Сведения о блокировке недоступны. Повторите переход на сайт для новой проверки.";
