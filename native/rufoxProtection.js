@@ -17,13 +17,22 @@ let warningHost = null;
 // from the actual internal document URI, as Firefox's own error pages do.
 const parameters = new URLSearchParams(new URL(document.documentURI).hash.slice(1));
 const warningMode = parameters.get("warning") === "1";
-$("management").hidden = warningMode;
-$("page-state").hidden = warningMode;
+const settingsMode = !warningMode && parameters.get("view") === "settings";
+$("management").hidden = !settingsMode;
+$("manual-entry").hidden = !settingsMode;
+$("page-controls").hidden = warningMode || settingsMode;
+$("permission-controls").hidden = warningMode;
+$("allow").hidden = warningMode;
+$("reload-option").hidden = warningMode;
 $("main").className = warningMode ? "warning" : "";
+$("heading").textContent = settingsMode ? "Настройки и исключения" : "На этой странице";
 if (warningMode) document.title = "Сайт заблокирован · Bearium";
-$("warning-lifetime").textContent = privateMode
-  ? "«Разрешить этот домен» — до закрытия всех приватных вкладок."
-  : "«Разрешить этот домен» — запомнить выбор для этого сайта. Отменить его можно в настройках защиты.";
+const internalURL = "about:bearium-protection#";
+const contextQuery = parameters.get("url") ? "url=" + encodeURIComponent(parameters.get("url")) : "";
+$("manage").href = internalURL + "view=settings&" + contextQuery;
+$("manage").hidden = settingsMode;
+$("page-link").href = internalURL + contextQuery;
+$("page-link").hidden = !settingsMode && !warningMode;
 const sources = privateMode ? [[memory, privatePref, "приватный сеанс"]] :
   [[memory, sessionPref, "сеанс"], [Services.prefs, regularPref, "постоянно"]];
 function entries(branch, pref) {
@@ -74,10 +83,39 @@ const reasons = {
   "certificate-unreadable": "Не удалось прочитать данные сертификата для проверки SCT",
   "verification-error": "Ошибка проверки SCT",
 };
-function renderReport(report, parent) {
+function renderCertificate(report, host, parent) {
+  const fields = node("dl", undefined, parent);
+  fields.className = "certificate-fields";
+  const certificate = report.certificate || {};
+  const rows = [
+    ["Хост", host],
+    ["SHA-256 сертификата сайта", certificate.sha256Fingerprint],
+    ["SHA-256 отслеживаемого УЦ", RufoxLogMetadata.rootFingerprint],
+    ["Кому выдан (Subject)", certificate.subjectName],
+    ["Кем выдан (Issuer)", certificate.issuerName],
+    ["Серийный номер", certificate.serialNumber],
+    ["Действителен с (UTC)", certificate.notBefore],
+    ["Действителен до (UTC)", certificate.notAfter],
+    ["SCT", report.ctException ? "Проверка отключена исключением" :
+      reasons[report.ctReason] || "Нет результата проверки"],
+  ];
+  for (const [label, value] of rows) {
+    node("dt", label, fields);
+    node("dd", value || "Недоступно для этого соединения", fields);
+  }
+}
+function briefReason(report) {
+  if (!report) return "Подробности проверки недоступны";
+  if (report.state === "blocked") return !report.zoneAllowed && !report.zoneException
+    ? "УЦ Минцифры вне разрешённой зоны" : "Не пройдена проверка SCT";
+  if (report.ctException) return "Проверка SCT отключена исключением";
+  if (report.state === "exception") return "Действует разрешение для этого домена";
+  return "Проверка пройдена";
+}
+function renderReport(report, parent, host) {
   const detail = node("details", undefined, parent);
-  node("summary", report.state === "blocked" ? "Блокировка политикой УЦ" :
-    report.state === "exception" ? "Применено пользовательское разрешение" : "Проверка пройдена", detail);
+  node("summary", "Сведения о сертификате и проверке", detail);
+  renderCertificate(report, host, detail);
   if (report.oneShot) node("p", "Применён одноразовый обход для этого перехода.", detail);
   node("p", report.zoneAllowed ? "Домен в .ru / .su / .рф." :
     report.zoneException ? "Домен вне разрешённых зон; применено исключение зоны." : "Домен вне разрешённых зон; запрос блокируется.", detail);
@@ -100,35 +138,48 @@ function refreshPage() {
   lastSnapshot = serialized;
   $("page-state").textContent = !snapshot.available ? "Состояние исходной вкладки недоступно. Можно разрешить сайт вручную." :
     snapshot.state === "unavailable" ? "Нет результата проверки сертификата страницы. Причину общей ошибки соединения смотрите на странице ошибки." :
-    snapshot.total ? `Заблокировано запросов: ${snapshot.blocked}. Доменов: ${snapshot.truncated ? "не менее " : ""}${snapshot.blockedDomains}. Всего запросов с этим УЦ: ${snapshot.total}.` : "Запросов с результатом проверки этого УЦ не обнаружено.";
+    snapshot.total ? `Заблокировано запросов: ${snapshot.blocked}. Доменов: ${snapshot.truncated ? "не менее " : ""}${snapshot.blockedDomains}.` : "Запросов с результатом проверки этого УЦ не обнаружено.";
   if (snapshot.truncated) $("page-state").textContent += " Список ограничен 1000 доменами; счётчик продолжает учитывать запросы.";
   $("domains").replaceChildren();
   for (const domain of snapshot.domains) {
     const section = node("section", undefined, $("domains"));
     const label = node("label", undefined, section);
-    const checkbox = node("input", undefined, label);
-    checkbox.type = "checkbox"; checkbox.checked = selected.has(domain.host);
-    checkbox.dataset.host = domain.host;
-    checkbox.addEventListener("change", event => {
-      if (!event.isTrusted) return;
-      if (checkbox.checked) selected.add(domain.host); else selected.delete(domain.host);
-    });
-    label.append(document.createTextNode(` ${domain.host} — ${domain.count} запросов, ${domain.blocked} блокировок`));
-    for (const report of domain.reports) renderReport(report, section);
-    if (!domain.reports.length) node("p", "Подробности вытеснены более новыми запросами. Счётчик и выбор домена сохранены.", section);
+    if (domain.blocked) {
+      const checkbox = node("input", undefined, label);
+      checkbox.type = "checkbox"; checkbox.checked = selected.has(domain.host);
+      checkbox.dataset.host = domain.host;
+      checkbox.addEventListener("change", event => {
+        if (!event.isTrusted) return;
+        if (checkbox.checked) selected.add(domain.host); else selected.delete(domain.host);
+        updateSelection();
+      });
+    }
+    label.append(document.createTextNode(domain.host));
+    const report = domain.reports.find(r => r.state === "blocked") || domain.reports[domain.reports.length - 1];
+    node("p", briefReason(report), section);
+    for (const report of domain.reports) renderReport(report, section, domain.host);
   }
+  updateSelection();
 }
 function updateSelection() {
+  const blocked = snapshot.domains.filter(d => d.blocked).map(d => d.host);
+  for (const host of selected) if (!blocked.includes(host)) selected.delete(host);
   for (const input of $("domains").querySelectorAll("input")) input.checked = selected.has(input.dataset.host);
+  $("select-blocked").checked = blocked.length > 0 && selected.size === blocked.length;
+  $("select-blocked").indeterminate = selected.size > 0 && selected.size < blocked.length;
+  $("select-blocked").disabled = !blocked.length;
+  const count = settingsMode ? new Set($("hosts").value.split(/\s+/).filter(Boolean)).size : selected.size;
+  $("allow").disabled = !count;
+  $("allow").textContent = count ? `Разрешить выбранные сайты (${count})` : settingsMode ? "Укажите домены" : "Выберите домены";
 }
-$("select-blocked").addEventListener("click", event => {
+$("select-blocked").addEventListener("change", event => {
   if (!event.isTrusted) return;
-  snapshot.domains.filter(d => d.blocked).forEach(d => selected.add(d.host)); updateSelection();
+  if ($("select-blocked").checked) snapshot.domains.filter(d => d.blocked).forEach(d => selected.add(d.host));
+  else selected.clear();
+  updateSelection();
 });
-$("clear-selection").addEventListener("click", event => {
-  if (!event.isTrusted) return;
-  selected.clear(); updateSelection();
-});
+$("hosts").addEventListener("input", updateSelection);
+
 function openOnce(event) {
   if (!event.isTrusted || !returnURL) return;
   const browser = window.browsingContext.top.embedderElement;
@@ -158,11 +209,11 @@ function allowHosts(event, requestedHosts) {
     for (const host of hosts) values.add(`${host}|${scope}${expiry}`);
     save(branch, pref, values);
     $("status").textContent = "Разрешение сохранено. Вернитесь на сайт для новой проверки.";
-    if (returnURL && $("reload").checked) location.replace(returnURL);
+    if (returnURL && (warningMode || $("reload").checked)) location.replace(returnURL);
   } catch (error) { $("status").textContent = error.message; }
 }
 $("allow").addEventListener("click", event =>
-  allowHosts(event, [...selected, ...$("hosts").value.split(/\s+/).filter(Boolean)]));
+  allowHosts(event, settingsMode ? $("hosts").value.split(/\s+/).filter(Boolean) : [...selected]));
 $("allow-domain").addEventListener("click", event => {
   if (warningHost) allowHosts(event, [warningHost]);
 });
@@ -177,7 +228,7 @@ $("hardened").addEventListener("change", event => {
   $("status").textContent = "Режим изменён. Откройте сайт повторно для новой проверки.";
 });
 $("privacy").textContent = privateMode ? "Приватный режим: разрешения хранятся в памяти до закрытия всех приватных вкладок." :
-  "По умолчанию разрешение сохраняется постоянно. Срок и область можно изменить в параметрах исключения.";
+  "По умолчанию домены разрешаются постоянно для зоны и SCT. Другой срок и вид разрешения можно выбрать ниже.";
 if (privateMode) {
   $("duration").value = "session";
   $("duration").options[2].disabled = true;
@@ -191,14 +242,8 @@ try {
     const host = normalize(target);
     const uri = Services.io.newURI(target);
     refreshPage();
-    if (!snapshot.domains.length) $("hosts").value = host;
-    else if (snapshot.domains.some(d => d.host === host && d.blocked)) {
-      selected.add(host); updateSelection();
-    }
     returnURL = uri.spec;
-    $("one-shot").hidden = warningMode;
-    $("manage").href = "about:bearium-protection#url=" + encodeURIComponent(uri.spec);
-    $("manage").hidden = !warningMode;
+    $("one-shot").hidden = warningMode || settingsMode;
     if (warningMode) {
       const report = snapshot.mainReport;
       const valid = snapshot.url === uri.spec && report?.state === "blocked";
@@ -216,14 +261,23 @@ try {
           ? "Сайт использует Russian Trusted Root CA вне разрешённых зон .ru, .su и .рф."
           : "Сайт использует Russian Trusted Root CA. Проверка SCT: " + (reasons[report.ctReason] || "нет подходящих подписей журналов") + ".";
         $("warning-actions").hidden = false;
+        $("warning-certificate").hidden = false;
+        $("permission-controls").hidden = false;
+        renderCertificate(report, host, $("certificate-fields"));
       } else {
         $("reason").textContent = "Сведения о блокировке недоступны. Повторите переход на сайт для новой проверки.";
       }
     }
-    $("return").href = uri.spec; $("return").hidden = false;
+    $("return").href = uri.spec; $("return").hidden = warningMode;
   }
 } catch (_) { /* Manual controls remain available without an originating URL. */ }
 $("reload").disabled = !returnURL;
-renderExceptions(); refreshPage();
+renderExceptions(); refreshPage(); updateSelection();
 const refreshTimer = setInterval(refreshPage, 1000);
 window.addEventListener("unload", () => clearInterval(refreshTimer), { once: true });
+
+// Links between the page list and settings differ only by their fragment.
+// Reload the internal document so each destination initializes its own view.
+window.addEventListener("hashchange", () => {
+  if (location.protocol === "about:") location.reload();
+});

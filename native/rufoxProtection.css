@@ -25,3 +25,22 @@ details p { overflow-wrap: anywhere; font-size: .9rem; }
 #back { border: 1px solid GrayText; border-radius: .4rem; }
 #continue { background: #f0b23e; color: #241707; }
 #allow-domain { background: #a6412d; color: white; }
+
+#allow { display: block; width: 100%; border-radius: .4rem; }
+#allow[hidden] { display: none; }
+#allow:disabled { cursor: default; opacity: .55; }
+#domains label { overflow-wrap: anywhere; }
+#domains section > p { font-size: .9rem; margin: .5rem 0; }
+#domains summary { font-size: .9rem; }
+#manage, #page-link { display: block; text-align: center; border: 1px solid GrayText; border-radius: .4rem; margin: .5rem 0; }
+#manage[hidden], #page-link[hidden] { display: none; }
+.certificate-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); border: 1px solid GrayText; border-radius: .5rem; font-size: .85rem; }
+.certificate-fields dt, .certificate-fields dd { margin: 0; padding: .65rem; border-bottom: 1px solid GrayText; overflow-wrap: anywhere; white-space: pre-wrap; }
+.certificate-fields dd { font-family: monospace; user-select: text; }
+.certificate-fields dt:last-of-type, .certificate-fields dd:last-child { border-bottom: 0; }
+@media (max-width: 420px) {
+  main { padding: 1rem; }
+  .certificate-fields { grid-template-columns: minmax(0, 1fr); }
+  .certificate-fields dt { border-bottom: 0; padding-bottom: .25rem; font-weight: 600; }
+  .certificate-fields dd { padding-top: .25rem; }
+}

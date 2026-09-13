@@ -65,7 +65,7 @@ internal fun RufoxProtectionSummary(engine: EngineSession?, onOpen: () -> Unit) 
         Column {
             Text("Защита сертификатов · CAnttRUst")
             Text(summary)
-            Text("Домены, SCT и разрешения")
+            Text("Посмотреть домены этой страницы")
         }
     }
 }

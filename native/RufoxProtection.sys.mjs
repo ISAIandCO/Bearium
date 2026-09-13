@@ -92,14 +92,37 @@ function begin(channel, tab) {
 function bind(channel, tab) {
   if (!bindings.has(channel)) bindings.set(channel, { tab, page: tab.page, seen: false });
 }
+// Keep only bounded, plain certificate fields, alongside the existing 20-report
+// per-tab history. Failed TLS handshakes may only expose handshakeCertificates.
+function certificateDetails(info) {
+  let cert;
+  try { cert = info.serverCert; } catch (_) {}
+  if (!cert) {
+    try { cert = info.handshakeCertificates?.[0]; } catch (_) {}
+  }
+  if (!cert) return null;
+  const result = {};
+  for (const field of ["sha256Fingerprint", "subjectName", "issuerName", "serialNumber"]) {
+    try { result[field] = String(cert[field] || "").slice(0, 8192); } catch (_) {}
+  }
+  for (const field of ["notBefore", "notAfter"]) {
+    try {
+      const millis = Number(cert.validity[field]) / 1000;
+      if (Number.isFinite(millis)) result[field] = new Date(millis).toISOString();
+    } catch (_) {}
+  }
+  return result;
+}
 function collect(channel) {
   const binding = bindings.get(channel);
   if (!binding || binding.seen || binding.page !== binding.tab.page) return;
-  const raw = channel.securityInfo?.QueryInterface(Ci.nsITransportSecurityInfo).rufoxPolicy;
+  const info = channel.securityInfo?.QueryInterface(Ci.nsITransportSecurityInfo);
+  const raw = info?.rufoxPolicy;
   if (!raw) return;
   let report;
   try { report = JSON.parse(raw); } catch (_) { return; }
   if (report.version !== 1) return;
+  report.certificate = certificateDetails(info);
   binding.seen = true;
   const page = binding.page;
   const host = channel.URI.asciiHost.toLowerCase().replace(/\.$/, "");
