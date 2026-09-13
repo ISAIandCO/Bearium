@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import unittest
+import os
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 
 
@@ -13,6 +17,23 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    def test_signer_pipeline_passes_output_and_preserves_certificate_report(self) -> None:
+        start = self.workflow.index('          printf \'%s\\n\' "$signer_info"')
+        end = self.workflow.index('          expected_signer=', start)
+        script = textwrap.dedent(self.workflow[start:end])
+        digest = "a" * 64
+        signer_info = f"Verifies\nV2 Signer: certificate SHA-256 digest: {digest}"
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "release.apk"
+            result = subprocess.run(
+                ["bash", "-e", "-c", script + '\nprintf "%s\\n" "$signer_sha256"'],
+                env={**os.environ, "signer_info": signer_info,
+                     "release_apk": str(apk), "GITHUB_WORKSPACE": str(REPOSITORY_ROOT)},
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(result.stdout.splitlines()[-1], digest)
+            self.assertEqual(Path(str(apk) + ".certificate.txt").read_text(), signer_info + "\n")
 
     def test_native_policy_pr_build_cannot_publish_a_release(self) -> None:
         trigger_section = self.workflow.split("permissions:", 1)[0]

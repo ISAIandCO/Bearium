@@ -1,13 +1,1 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-<group android:pivotX="54" android:pivotY="54" android:scaleX="0.82" android:scaleY="0.82">
-<path android:fillColor="#e52219" android:pathData="M45 22 C27 30 22 47 28 61 C18 53 21 39 27 32 C10 45 17 72 39 81 L61 85 C40 75 29 63 34 49 C36 39 40 32 45 22 Z"/>
-<path android:fillColor="#ffb52e" android:pathData="M31 37 C21 52 27 68 45 75 C34 63 30 51 31 37 Z"/>
-<path android:fillColor="#a70d19" android:pathData="M41 48 C34 40 35 29 44 28 C51 27 55 33 55 38 C65 34 78 40 80 51 L90 57 L89 65 C86 72 79 74 73 72 C66 76 64 82 66 86 L44 81 C38 71 37 59 41 48 Z"/>
-<path android:fillColor="#ff6422" android:pathData="M42 45 C36 35 43 28 49 34 L54 41 C66 34 79 42 79 51 L88 57 L82 67 L70 69 C56 67 49 76 51 82 C39 70 41 55 49 49 L42 45 Z"/>
-<path android:fillColor="#ffba50" android:pathData="M47 35 C41 32 40 39 44 42 L50 40 Z M56 42 C66 36 76 44 78 52 L68 52 C65 45 61 44 56 42 Z"/>
-<path android:fillColor="#5d101b" android:pathData="M44 37 C43 35 41 38 44 42 L48 41 Z M58 51 L72 49 L74 54 L66 56 Z"/>
-<path android:fillColor="#ffe0a0" android:pathData="M73 52 C78 52 80 55 87 57 L86 64 C80 71 72 70 68 66 C64 62 68 56 73 52 Z M65 52 L69 52 L68 54 Z"/>
-<path android:fillColor="#35101c" android:pathData="M83 57 C88 55 92 58 88 63 L85 64 L82 61 Z M72 70 C65 76 62 80 66 86 L55 82 C53 73 62 67 72 70 Z"/>
-<path android:fillColor="#ff8a27" android:pathData="M73 73 C73 78 79 81 80 85 L66 86 C64 81 68 76 73 73 Z"/>
-</group>
-</vector>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/bearium_artwork" android:gravity="fill" android:filter="true"/>

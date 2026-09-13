@@ -93,14 +93,17 @@ class CertificatePatchTest(unittest.TestCase):
         self.assertNotIn("universalApk true", patched)
         self.assertEqual(patched, patch_firefox.patch_fenix_gradle(patched))
 
-    def test_launcher_uses_independent_vector_assets(self) -> None:
+    def test_launcher_uses_approved_color_and_monochrome_assets(self) -> None:
         upstream = '<vector xmlns:android="http://schemas.android.com/apk/res/android"><path/></vector>'
         patched = patch_firefox.patch_fenix_launcher_foreground(upstream)
-        self.assertEqual(ElementTree.fromstring(patched).tag, "vector")
+        self.assertEqual(ElementTree.fromstring(patched).tag, "bitmap")
+        self.assertIn("@drawable/bearium_artwork", patched)
         self.assertEqual(patched, patch_firefox.patch_fenix_launcher_foreground(patched))
         for asset, _ in patch_firefox.FENIX_ADAPTIVE_ICONS:
             ElementTree.fromstring(asset.read_text())
         for asset, _ in patch_firefox.FENIX_LEGACY_ICONS:
+            self.assertEqual(asset.read_bytes()[:4], b"RIFF")
+        for asset, _ in patch_firefox.FENIX_COLOR_ARTWORK:
             self.assertEqual(asset.read_bytes()[:4], b"RIFF")
 
     def test_themed_launcher_does_not_flatten_fox_r_to_black_r(self) -> None:
@@ -132,17 +135,33 @@ class CertificatePatchTest(unittest.TestCase):
             self.assertEqual(
                 len(changed),
                 len(patch_firefox.FENIX_LEGACY_ICONS)
-                + len(patch_firefox.FENIX_ADAPTIVE_ICONS),
+                + len(patch_firefox.FENIX_ADAPTIVE_ICONS)
+                + len(patch_firefox.FENIX_COLOR_ARTWORK),
             )
             self.assertEqual(patch_firefox.copy_branding_icons(source_root), [])
             for asset_path, relative_path in (
                 *patch_firefox.FENIX_LEGACY_ICONS,
                 *patch_firefox.FENIX_ADAPTIVE_ICONS,
+                *patch_firefox.FENIX_COLOR_ARTWORK,
             ):
                 self.assertEqual(
                     (source_root / relative_path).read_bytes(),
                     Path(asset_path).read_bytes(),
                 )
+
+    def test_compose_branding_uses_direct_bitmap_without_duplicate_xml(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            res = root / "mobile/android/fenix/app/src/main/res/drawable"
+            res.mkdir(parents=True)
+            for name in ("ic_splash_logo", "ic_firefox", "ic_status_logo"):
+                (res / f"{name}.xml").write_text("<vector/>")
+            patch_firefox.rebrand_resources(root)
+            self.assertFalse((res / "ic_splash_logo.xml").exists())
+            self.assertFalse((res / "ic_firefox.xml").exists())
+            self.assertEqual((res / "ic_splash_logo.webp").read_bytes()[:4], b"RIFF")
+            self.assertEqual(ElementTree.parse(res / "ic_status_logo.xml").getroot().tag, "vector")
+            self.assertEqual(patch_firefox.rebrand_resources(root), [])
 
 
 if __name__ == "__main__":
