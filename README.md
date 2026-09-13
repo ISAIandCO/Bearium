@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="branding/android/bearium-xxxhdpi.webp" width="200" height="200" alt="Bearium">
+  <img src="branding/android/ui/res/drawable-xxxhdpi/ic_logo_wordmark_private.webp" height="200" alt="Bearium">
 </p>
-
-<h1 align="center">Bearium</h1>
 
 <p align="center">
   <strong>Firefox для Android с ограниченной поддержкой Russian Trusted Root CA</strong>
