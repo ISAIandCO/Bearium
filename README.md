@@ -10,7 +10,7 @@
   <a href="https://github.com/ISAIandCO/Bearium/releases/latest">
     <img alt="GitHub Release" src="https://img.shields.io/github/v/release/ISAIandCO/Bearium?display_name=tag">
   </a>
-  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium%3A%2F%2Fadd%3Furl%3Dhttps%253A%252F%252Fgithub.com%252FISAIandCO%252FBearium">
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/ISAIandCO/Bearium">
     <img alt="Добавить в Obtainium" src="https://img.shields.io/badge/Obtainium-Добавить-2F80ED">
   </a>
   <a href="https://github.com/ISAIandCO/Bearium/releases">
