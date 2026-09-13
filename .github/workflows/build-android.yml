@@ -3,8 +3,7 @@ name: Build and release Bearium for Android
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron uses UTC. Check daily. A development release that
-    # already exists for the current Firefox version is skipped before the build.
+    # GitHub cron uses UTC. Check daily for Firefox or reviewed CT/root changes.
     - cron: "0 23 * * *"
 
 permissions:
@@ -20,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      source_json: ${{ steps.source.outputs.source_json }}
+      source_json: ${{ steps.release.outputs.source_json }}
       version_code: ${{ github.run_number }}
       build_date: ${{ steps.source.outputs.build_date }}
       archive_url: ${{ steps.source.outputs.archive_url }}
@@ -42,38 +41,21 @@ jobs:
           data=json.load(open('source.json'))
           data.update(build_date=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S'),
                       version_code=int(os.environ['GITHUB_RUN_NUMBER']), source_commit=os.environ['GITHUB_SHA'])
-          print('source_json='+json.dumps(data))
+          open('source.json', 'w').write(json.dumps(data))
           for k,v in data.items(): print(f'{k}={v}')
           PYCODE
 
-      - name: Skip a Firefox version that was already published
+      - name: Check Firefox version and reviewed CT/root changes
         id: release
         env:
-          FIREFOX_VERSION: ${{ steps.source.outputs.version }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          release_tag="${FIREFOX_VERSION}"
-          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
-          set +e
-          response="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" 2>&1)"
-          status=$?
-          set -e
-          if [[ "$status" -eq 0 ]]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release $release_tag already exists; no build is required."
-          elif grep -Fq "HTTP 404" <<< "$response"; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Could not determine whether release $release_tag exists."
-            printf '%s\n' "$response" >&2
-            exit "$status"
-          fi
+        run: python3 -m scripts.resolve_policy_release >> "$GITHUB_OUTPUT"
 
   build:
     environment: release-signing
     name: Build Bearium ${{ needs.resolve.outputs.version }} (${{ matrix.abi }})
     needs: resolve
-    # Scheduled checks skip versions that are already published. A manual run
+    # Scheduled checks skip only when both Firefox and CT/root data are unchanged. A manual run
     # intentionally rebuilds the current version so broken release assets can
     # be replaced after a CI fix.
     if: needs.resolve.outputs.release_exists != 'true' || github.event_name == 'workflow_dispatch'
@@ -381,6 +363,8 @@ jobs:
       - name: Write release metadata
         env:
           SOURCE_JSON: ${{ needs.resolve.outputs.source_json }}
+          POLICY_FINGERPRINT: ${{ fromJSON(needs.resolve.outputs.source_json).policy_fingerprint }}
+          CERTIFICATE_SHA256: ${{ fromJSON(needs.resolve.outputs.source_json).certificate_sha256 }}
           FIREFOX_VERSION: ${{ needs.resolve.outputs.version }}
           FIREFOX_REVISION: ${{ needs.resolve.outputs.revision }}
           FIREFOX_TAG: ${{ needs.resolve.outputs.tag }}
@@ -401,11 +385,15 @@ jobs:
           Signing certificate: see each APK certificate report
           Protected CA policy: .ru,.xn--p1ai,.su plus Yandex SCT; user exceptions supported
           IP subjectAltName values: rejected
-          Ministry CA DER SHA-256: d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31
+          Ministry CA DER SHA-256: $CERTIFICATE_SHA256
+          CT/root policy fingerprint: $POLICY_FINGERPRINT
           EOF
 
           {
             echo "Bearium $RELEASE_TAG"
+            if [[ "$RELEASE_TAG" == *_SCTch* ]]; then
+              echo "CT log list or protected root certificate update; Firefox remains $FIREFOX_VERSION."
+            fi
             echo
             echo "Three production-signed installable APKs built from Mozilla tag $FIREFOX_TAG."
             echo
@@ -492,6 +480,7 @@ jobs:
               if gh release create "$RELEASE_TAG" \
                 --target "$GITHUB_SHA" \
                 --title "$RELEASE_TAG" \
+                --latest \
                 --notes-file artifacts/release-notes.md; then
                 release_ready=true
                 break

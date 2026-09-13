@@ -58,7 +58,7 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
             "d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f",
             self.workflow,
         )
-        self.assertIn('release_tag="${FIREFOX_VERSION}"', self.workflow)
+        self.assertIn('python3 -m scripts.resolve_policy_release', self.workflow)
         self.assertIn('BEARIUM_PRODUCTION: "1"', self.workflow)
         self.assertIn("prepare_play_signing.py", self.workflow)
         self.assertIn("environment: release-signing", self.workflow)
