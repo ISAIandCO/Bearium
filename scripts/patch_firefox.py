@@ -50,6 +50,7 @@ FENIX_ADAPTIVE_ROUND_ICON = Path(
 )
 
 ICON_SOURCE_DIR = REPOSITORY_ROOT / "branding/android"
+UI_RESOURCE_DIR = ICON_SOURCE_DIR / "ui/res"
 ICON_DENSITIES = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
 FENIX_LEGACY_ICONS = tuple(
     (
@@ -363,29 +364,43 @@ def rebrand_resources(source_root: Path) -> list[Path]:
             if patched != source:
                 path.write_text(patched)
                 changed.append(path.relative_to(source_root))
-        for folder in res.glob("drawable*"):
-            for name in ("ic_firefox", "expressive_firefox", "ic_splash_logo", "ic_status_logo", "ic_onboarding_welcome"):
-                path = folder / (name + ".xml")
-                if path.is_file():
-                    if name == "ic_status_logo":
-                        content = (ICON_SOURCE_DIR / "bearium-monochrome.xml").read_bytes()
-                        destination = path
-                    else:
-                        # Compose painterResource accepts bitmap resources directly,
-                        # but not the XML bitmap wrapper used by the launcher.
-                        content = (ICON_SOURCE_DIR / "bearium-foreground.webp").read_bytes()
-                        destination = path.with_suffix(".webp")
-                        path.unlink()
-                        changed.append(path.relative_to(source_root))
-                    if not destination.exists() or destination.read_bytes() != content:
-                        destination.write_bytes(content)
-                        changed.append(destination.relative_to(source_root))
-                elif name != "ic_status_logo" and path.with_suffix(".webp").is_file():
-                    destination = path.with_suffix(".webp")
-                    content = (ICON_SOURCE_DIR / "bearium-foreground.webp").read_bytes()
-                    if destination.read_bytes() != content:
-                        destination.write_bytes(content)
-                        changed.append(destination.relative_to(source_root))
+        for path in res.glob("values*/colors.xml"):
+            source = path.read_text()
+            patched = re.sub(r'(<color name="ic_launcher_background">).*?(</color>)',
+                             r'\g<1>#650E20\2', source)
+            if patched != source:
+                path.write_text(patched)
+                changed.append(path.relative_to(source_root))
+    changed.extend(copy_ui_branding(source_root))
+    return changed
+
+
+def copy_ui_branding(source_root: Path) -> list[Path]:
+    """Install reviewed artwork and remove upstream density/theme overrides.
+
+    Keep resource IDs so XML views, Compose painterResource, shortcuts and the
+    icon picker all see the same artwork. In particular, drawable-anydpi vectors
+    would beat replacement density bitmaps if they were left in the checkout.
+    """
+    assets = sorted(path for path in UI_RESOURCE_DIR.glob("*/*") if path.is_file())
+    if not assets:
+        raise ValueError("Bearium UI branding resources are missing")
+    resources = {(path.parent.name.split("-")[0], path.stem) for path in assets}
+    changed = []
+    for variant in ("main", "release"):
+        res = source_root / "mobile/android/fenix/app/src" / variant / "res"
+        destinations = {res / path.relative_to(UI_RESOURCE_DIR): path for path in assets}
+        for path in sorted(res.glob("*/*")):
+            key = (path.parent.name.split("-")[0], path.stem)
+            if path.is_file() and key in resources and path not in destinations:
+                path.unlink()
+                changed.append(path.relative_to(source_root))
+        for destination, asset in destinations.items():
+            content = asset.read_bytes()
+            if not destination.is_file() or destination.read_bytes() != content:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+                changed.append(destination.relative_to(source_root))
     return changed
 
 
@@ -495,6 +510,9 @@ def main() -> None:
             *(path for _, path in FENIX_LEGACY_ICONS),
             *(path for _, path in FENIX_ADAPTIVE_ICONS),
             *(path for _, path in FENIX_COLOR_ARTWORK),
+            *(Path(f"mobile/android/fenix/app/src/{variant}/res") / path.relative_to(UI_RESOURCE_DIR)
+              for variant in ("main", "release")
+              for path in sorted(UI_RESOURCE_DIR.glob("*/*")) if path.is_file()),
             GENERATED_HEADER,
             *native_policy.generated_files(),
         ):
