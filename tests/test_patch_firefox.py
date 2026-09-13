@@ -183,7 +183,7 @@ class CertificatePatchTest(unittest.TestCase):
             patch_firefox.rebrand_resources(root)
             self.assertFalse((res / "ic_splash_logo.xml").exists())
             self.assertFalse((res / "ic_firefox.xml").exists())
-            self.assertEqual((res / "ic_splash_logo.webp").read_bytes()[:4], b"RIFF")
+            self.assertEqual((res.parent / "drawable-xxxhdpi/ic_splash_logo.webp").read_bytes()[:4], b"RIFF")
             self.assertEqual(ElementTree.parse(res / "ic_status_logo.xml").getroot().tag, "vector")
             self.assertEqual(patch_firefox.rebrand_resources(root), [])
 
