@@ -149,6 +149,30 @@ class CertificatePatchTest(unittest.TestCase):
                     Path(asset_path).read_bytes(),
                 )
 
+    def test_about_branding_and_localized_product_names(self) -> None:
+        layout = '<ImageView app:srcCompat="?fenixLogo" android:id="@+id/wordmark" />'
+        patched = patch_firefox.patch_about_layout(layout)
+        self.assertIn('@drawable/bearium_artwork', patched)
+        self.assertEqual(patched, patch_firefox.patch_about_layout(patched))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for locale in ('values', 'values-ru'):
+                path = root / 'mobile/android/fenix/app/src/main/res' / locale / 'strings.xml'
+                path.parent.mkdir(parents=True)
+                path.write_text('<resources><string name="about_content">%1$s by Mozilla.</string>'
+                    '<string name="settings_title">Rufox</string>'
+                    '<string name="browser_label">Firefox</string>'
+                    '<string name="sync_label">Firefox Sync</string></resources>')
+            patch_firefox.rebrand_resources(root)
+            for path in root.rglob('strings.xml'):
+                resources = {item.attrib['name']: item.text for item in ElementTree.parse(path).getroot()}
+                self.assertEqual(resources['settings_title'], 'Bearium')
+                self.assertEqual(resources['browser_label'], 'Bearium')
+                self.assertEqual(resources['sync_label'], 'Firefox Sync')
+                self.assertIn('Mozilla', resources['about_content'])
+                self.assertNotIn('by Mozilla', resources['about_content'])
+            self.assertEqual(patch_firefox.rebrand_resources(root), [])
+
     def test_compose_branding_uses_direct_bitmap_without_duplicate_xml(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

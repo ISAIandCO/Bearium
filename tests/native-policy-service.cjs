@@ -76,14 +76,14 @@ Services.obs.notifyObservers(failed,'http-on-rufox-request');
 Services.obs.notifyObservers(failed,'http-on-rufox-security-info');
 assert.equal(service.snapshot(a).blocked,1);
 assert.equal(service.snapshot(a).blockedDomains,1);
-assert.equal(service.errorPage(a,failed.URI.spec),'about:rufox-protection#warning=1&url='+encodeURIComponent(failed.URI.spec));
+assert.equal(service.errorPage(a,failed.URI.spec),'about:bearium-protection#warning=1&url='+encodeURIComponent(failed.URI.spec));
 assert.equal(service.errorPage(b,failed.URI.spec),null,'another tab cannot reuse a report');
 assert.equal(service.errorPage(a,'https://different.com/'),null);
 // DocumentChannel progress arrives after the parent HttpChannel report.
 const documentChannel=channel(1,'blocked.com');documentChannel.securityInfo.rufoxPolicy='';
 begin(a,documentChannel);
 assert.equal(service.snapshot(a).blocked,1,'late progress must not erase early TLS report');
-const errorDocument=channel(1);errorDocument.URI={spec:'about:rufox-protection#warning=1',schemeIs:()=>false};
+const errorDocument=channel(1);errorDocument.URI={spec:'about:bearium-protection#warning=1',schemeIs:()=>false};
 begin(a,errorDocument);
 assert.equal(service.snapshot(a).blocked,1,'warning document preserves the failed page');
 Services.obs.notifyObservers(failed,'http-on-failed-opening-request');

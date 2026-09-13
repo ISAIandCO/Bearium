@@ -30,7 +30,7 @@ function page(privateMode = false, target = 'https://EXAMPLE.ru/a', report = nul
     RufoxLogMetadata: {version:'test',timestamp:'2026-01-01',logs:{}},
     setInterval: () => 1, clearInterval() {},
     Services, window: {addEventListener() {}, browsingContext: {top: {embedderElement:{}}}}, URL, URLSearchParams, location: {hash:'#'+(report?'warning=1&':'')+'url='+encodeURIComponent(target),replace() {navigations++;}},
-    document: {documentURI:"about:rufox-protection#"+(report?"warning=1&":"")+"url="+encodeURIComponent(target), getElementById:get, createElement:element, createTextNode:v=>v},
+    document: {documentURI:"about:bearium-protection#"+(report?"warning=1&":"")+"url="+encodeURIComponent(target), getElementById:get, createElement:element, createTextNode:v=>v},
   });
   return {get, normal, defaults, observers, cancelled:()=>cancelled, oneShots:()=>oneShots, navigations:()=>navigations,
     click(trusted=true) {get('allow').handlers.click({isTrusted:trusted});}};
@@ -68,7 +68,13 @@ const warning = page(false, 'https://blocked.com/', {
   mainReport:{state:'blocked',zoneAllowed:false,zoneException:false},
 });
 assert.equal(warning.get('warning-actions').hidden,false);
-assert.match(warning.get('reason').textContent,/вне разрешённых зон/);
+assert.match(warning.get('reason').textContent,/не относится к российским доменам/);
+assert.match(warning.get('warning-detail').textContent,/вне разрешённых зон/);
+assert.equal(warning.get('management').hidden,true);
+assert.equal(warning.get('page-state').hidden,true);
+assert.equal(warning.get('manage').href,'about:bearium-protection#url=https%3A%2F%2Fblocked.com%2F');
+assert.equal(p.get('management').hidden,false);
+assert.equal(p.get('page-state').hidden,false);
 assert.match(warning.get('page-state').textContent,/Заблокировано запросов: 1. Доменов: 1/);
 warning.get('allow-domain').handlers.click({isTrusted:false});
 assert.equal(warning.normal.size,0);
@@ -76,3 +82,19 @@ warning.get('allow-domain').handlers.click({isTrusted:true});
 assert.equal(warning.normal.get('security.rufox.exceptions'),'blocked.com|all');
 warning.get('continue').handlers.click({isTrusted:true});
 assert.equal(warning.oneShots(),1);
+
+const privateWarning = page(true, 'https://blocked.com/', {
+  available:true, url:'https://blocked.com/', domains:[],
+  mainReport:{state:'blocked',zoneAllowed:true,ctReason:'missing-yandex'},
+});
+assert.match(privateWarning.get('reason').textContent,/не прошёл дополнительную проверку/);
+assert.match(privateWarning.get('warning-lifetime').textContent,/до закрытия всех приватных вкладок/);
+privateWarning.get('allow-domain').handlers.click({isTrusted:true});
+assert.equal(privateWarning.normal.size,0);
+assert.equal(privateWarning.defaults.get('security.rufox.private_exceptions'),'blocked.com|all');
+const staleWarning = page(false, 'https://blocked.com/', {
+  available:true, url:'https://other.com/', domains:[], mainReport:{state:'blocked'},
+});
+assert.equal(staleWarning.get('warning-actions').hidden,true);
+staleWarning.get('allow-domain').handlers.click({isTrusted:true});
+assert.equal(staleWarning.normal.size,0);

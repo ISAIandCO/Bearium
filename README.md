@@ -50,7 +50,10 @@ Production: `app.bearium.browser`, dev: `app.bearium.browser.dev`.
 - `security/manager/ssl/nsNSSComponent.cpp`, `CommonSocketControl.cpp` и
   `netwerk/base/SSLTokensCache.cpp` — обновление политики и повторные соединения;
 - `docshell`, `toolkit/content` и панель доверия Fenix — внутренняя страница
-  `about:rufox-protection` и переход к ней из «щита» и страницы ошибки;
+  `about:bearium-protection` и переход к ней из «щита» и страницы ошибки;
+  при блокировке показывается короткое предупреждение с кнопками «Назад»,
+  «Продолжить один раз» и «Разрешить этот домен». Счётчики, список доменов
+  и управление исключениями доступны в настройках защиты;
 - `mobile/android/fenix/app/build.gradle` — независимый application ID,
   shared user ID и deep-link scheme;
 - `mobile/android/fenix/app/src/main/res/values/static_strings.xml` и release-

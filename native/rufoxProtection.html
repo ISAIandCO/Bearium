@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="chrome://global/content/rufoxProtection.css">
 <script src="chrome://global/content/rufoxLogMetadata.js" defer></script>
 <script src="chrome://global/content/rufoxProtection.js" defer></script>
-<main>
+<main id="main">
 <p>CAnttRUst · Bearium</p>
 <h1 id="heading">Защита сертификатов</h1>
 <p id="reason" hidden></p>
@@ -17,8 +17,15 @@
 <button id="back" type="button">Назад</button>
 <button id="continue" type="button">Продолжить один раз</button>
 <button id="allow-domain" type="button">Разрешить этот домен</button>
-<p>«Разрешить этот домен» разрешает зону и SCT постоянно. В приватном режиме — до закрытия приватных вкладок. Срок и вид исключения можно изменить ниже.</p>
+<p id="warning-lifetime"></p>
+<details><summary>Почему сайт заблокирован?</summary>
+<p id="warning-detail"></p>
+<p>Продолжайте, только если доверяете сайту. Разрешение не делает соединение безопасным.</p>
+</details>
 </div>
+<p id="status" role="status" aria-live="polite"></p>
+<a id="manage" hidden>Настройки защиты</a>
+<div id="management" hidden>
 <p>Bearium ограничивает использование Russian Trusted Root CA российскими доменными зонами и проверяет SCT — подписи журналов прозрачности сертификатов.</p>
 <p>Если эта защита мешает открыть сайт, вы можете разрешить его. Проверка имени, срока действия, подписи и отзыва сертификата продолжит работать.</p>
 <p id="privacy"></p>
@@ -53,7 +60,6 @@
 </details>
 <label><input type="checkbox" id="reload" checked> После разрешения вернуться на сайт</label>
 <button id="allow">Разрешить выбранные сайты</button>
-<p id="status" role="status" aria-live="polite"></p>
 <a id="return" hidden>Вернуться на сайт</a>
 <h2>Режим проверки</h2>
 <label><input type="checkbox" id="hardened"> Требовать SCT двух независимых операторов, включая Yandex</label>
@@ -65,5 +71,6 @@
 <h2>Сохранённые исключения</h2>
 <ul id="exceptions"></ul>
 <p>При изменении исключений активные сетевые соединения закрываются. Незавершённые загрузки могут прерваться; страницу нужно открыть повторно.</p>
+</div>
 </main>
 </html>

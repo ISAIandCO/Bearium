@@ -16,3 +16,12 @@ details p { overflow-wrap: anywhere; font-size: .9rem; }
 #page-state { padding: .75rem; border: 1px solid GrayText; border-radius: .5rem; }
 #warning-actions button { display: block; width: 100%; }
 #continue, #allow-domain { background: #7542e5; color: white; border: 0; border-radius: .4rem; }
+
+.warning { max-width: 32rem; }
+.warning h1 { font-size: 2rem; line-height: 1.15; }
+.warning #warning-host { padding: .75rem 0; }
+.warning #warning-lifetime, .warning details { font-size: .9rem; }
+#status:empty { display: none; }
+#back { border: 1px solid GrayText; border-radius: .4rem; }
+#continue { background: #f0b23e; color: #241707; }
+#allow-domain { background: #a6412d; color: white; }
