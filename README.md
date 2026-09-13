@@ -243,7 +243,7 @@ Bearium предназначен для случая, когда нужен го
 
 ## Обновления через Obtainium
 
-### [Добавить Bearium в Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium%3A%2F%2Fadd%3Furl%3Dhttps%253A%252F%252Fgithub.com%252FISAIandCO%252FBearium)
+### [Добавить Bearium в Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/ISAIandCO/Bearium)
 
 Источник:
 
