@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="branding/android/ui/res/drawable-xxxhdpi/ic_logo_wordmark_private.webp" height="200" alt="Bearium">
+  <img src="branding/android/ui/res/drawable-xxxhdpi/ic_logo_wordmark_private.webp" height="150" alt="Bearium">
 </p>
 
 <p align="center">
