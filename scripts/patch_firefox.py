@@ -78,6 +78,11 @@ FENIX_ADAPTIVE_ICONS = tuple(
                                ("bearium-monochrome.xml", "ic_launcher_monochrome"),
                                ("bearium-background.xml", "bearium_background"))
 )
+FENIX_COLOR_ARTWORK = tuple(
+    (ICON_SOURCE_DIR / "bearium-foreground.webp",
+     Path(f"mobile/android/fenix/app/src/{variant}/res/drawable-nodpi/bearium_artwork.webp"))
+    for variant in ("main", "release")
+)
 
 TEXT_TARGETS = (
     CERT_VERIFIER_CPP,
@@ -287,6 +292,8 @@ RFIREFOX_ADAPTIVE_FOREGROUND = (ICON_SOURCE_DIR / "bearium-foreground.xml").read
 
 
 def patch_fenix_launcher_foreground(source: str) -> str:
+    if source == RFIREFOX_ADAPTIVE_FOREGROUND:
+        return source
     if '<vector ' not in source:
         raise ValueError("unexpected launcher vector")
     return RFIREFOX_ADAPTIVE_FOREGROUND
@@ -352,11 +359,25 @@ def rebrand_resources(source_root: Path) -> list[Path]:
             for name in ("ic_firefox", "expressive_firefox", "ic_splash_logo", "ic_status_logo", "ic_onboarding_welcome"):
                 path = folder / (name + ".xml")
                 if path.is_file():
-                    asset = "bearium-monochrome.xml" if name == "ic_status_logo" else "bearium-foreground.xml"
-                    content = (ICON_SOURCE_DIR / asset).read_text()
-                    if path.read_text() != content:
-                        path.write_text(content)
+                    if name == "ic_status_logo":
+                        content = (ICON_SOURCE_DIR / "bearium-monochrome.xml").read_bytes()
+                        destination = path
+                    else:
+                        # Compose painterResource accepts bitmap resources directly,
+                        # but not the XML bitmap wrapper used by the launcher.
+                        content = (ICON_SOURCE_DIR / "bearium-foreground.webp").read_bytes()
+                        destination = path.with_suffix(".webp")
+                        path.unlink()
                         changed.append(path.relative_to(source_root))
+                    if not destination.exists() or destination.read_bytes() != content:
+                        destination.write_bytes(content)
+                        changed.append(destination.relative_to(source_root))
+                elif name != "ic_status_logo" and path.with_suffix(".webp").is_file():
+                    destination = path.with_suffix(".webp")
+                    content = (ICON_SOURCE_DIR / "bearium-foreground.webp").read_bytes()
+                    if destination.read_bytes() != content:
+                        destination.write_bytes(content)
+                        changed.append(destination.relative_to(source_root))
     return changed
 
 
@@ -412,7 +433,7 @@ def copy_branding_icons(source_root: Path) -> list[Path]:
         if destination.read_bytes() != asset_path.read_bytes():
             shutil.copyfile(asset_path, destination)
             changed.append(relative_path)
-    for asset_path, relative_path in FENIX_ADAPTIVE_ICONS:
+    for asset_path, relative_path in (*FENIX_ADAPTIVE_ICONS, *FENIX_COLOR_ARTWORK):
         if not asset_path.is_file():
             raise ValueError(f"launcher icon asset is missing: {asset_path}")
         destination = source_root / relative_path
@@ -464,6 +485,7 @@ def main() -> None:
             *TRANSFORMS,
             *(path for _, path in FENIX_LEGACY_ICONS),
             *(path for _, path in FENIX_ADAPTIVE_ICONS),
+            *(path for _, path in FENIX_COLOR_ARTWORK),
             GENERATED_HEADER,
             *native_policy.generated_files(),
         ):

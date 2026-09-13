@@ -57,13 +57,17 @@ Production: `app.bearium.browser`, dev: `app.bearium.browser.dev`.
   вариант файла — имя приложения;
 - `mobile/android/fenix/app/src/main/res/drawable/ic_launcher_foreground.xml`,
   release-foreground, monochrome drawable и release WebP по всем Android
-  density — векторная иконка медведя с пламенем.
+  density — медведь с пламенем из основного наброска Bearium.
 
 Готовые normal/round legacy-ресурсы находятся в `branding/android/`. Для
 adaptive icon патчер устанавливает прозрачный цветной foreground в безопасной
 зоне, а для themed icon — отдельный monochrome-силуэт, который Android окрашивает
 системной палитрой. Альтернативные иконки встроенной функции выбора Fenix не
 изменяются.
+
+Цветной рисунок хранится в PNG/WebP, чтобы сохранить градиенты наброска;
+монохромный — в SVG и Android VectorDrawable. Исходники и пояснения:
+[`branding/android/README.md`](branding/android/README.md).
 
 Скрипт `scripts/patch_firefox.py` применяет каждую замену только при однозначном
 совпадении ожидаемого upstream-кода. Если Mozilla изменила соответствующий
