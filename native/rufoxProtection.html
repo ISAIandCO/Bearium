@@ -9,58 +9,52 @@
 <script src="chrome://global/content/rufoxProtection.js" defer></script>
 <main id="main">
 <p>CAnttRUst · Bearium</p>
-<h1 id="heading">Защита сертификатов</h1>
+<h1 id="heading">На этой странице</h1>
 <p id="reason" hidden></p>
 <p id="warning-host" hidden></p>
+<details id="warning-certificate" hidden>
+<summary>Сведения о сертификате</summary>
+<p id="warning-detail"></p>
+<div id="certificate-fields"></div>
+</details>
+<div id="page-controls" hidden>
 <p id="page-state" role="status" aria-live="polite">Получение состояния…</p>
+<label><input type="checkbox" id="select-blocked"> Выбрать все заблокированные домены</label>
+<div id="domains"></div>
+<details><summary>О результатах проверки</summary>
+<p id="coverage">Показаны только соединения через отслеживаемый УЦ Минцифры. Отсутствие записей не подтверждает безопасность сайта. Подробности сохраняются для 20 последних вариантов запросов.</p>
+</details>
+</div>
+<div id="manual-entry" hidden>
+<label for="hosts">Добавить сайты в исключения — по одному в строке</label>
+<textarea id="hosts" rows="4" spellcheck="false" autocomplete="off" placeholder="example.ru"></textarea>
+</div>
+<div id="permission-controls" hidden>
+<p id="privacy"></p>
+<details id="exception-options">
+<summary>Параметры исключения</summary>
+<label for="scope">Что разрешить</label>
+<select id="scope">
+<option value="all">Зону и SCT</option>
+<option value="zone">Только зону — SCT проверять</option>
+<option value="ct">Только SCT — зону проверять</option>
+</select>
+<label for="duration">Срок разрешения</label>
+<select id="duration"><option value="session">До закрытия браузера</option><option value="hour">На один час</option><option value="permanent" selected>Постоянно</option></select>
+<p>Исключение действует только для выбранных доменов и этого УЦ. Поддомены автоматически не разрешаются. Остальные проверки сертификата продолжают работать.</p>
+<label id="reload-option"><input type="checkbox" id="reload" checked> После разрешения вернуться на сайт</label>
+</details>
+</div>
 <div id="warning-actions" hidden>
 <button id="back" type="button">Назад</button>
 <button id="continue" type="button">Продолжить один раз</button>
 <button id="allow-domain" type="button">Разрешить этот домен</button>
-<p id="warning-lifetime"></p>
-<details><summary>Почему сайт заблокирован?</summary>
-<p id="warning-detail"></p>
-<p>Продолжайте, только если доверяете сайту. Разрешение не делает соединение безопасным.</p>
-</details>
 </div>
+<button id="allow" type="button" hidden disabled>Выберите домены</button>
 <p id="status" role="status" aria-live="polite"></p>
-<a id="manage" hidden>Настройки защиты</a>
+<a id="page-link" hidden>Домены этой страницы</a>
+<a id="manage" hidden>Настройки и исключения</a>
 <div id="management" hidden>
-<p>Bearium ограничивает использование Russian Trusted Root CA российскими доменными зонами и проверяет SCT — подписи журналов прозрачности сертификатов.</p>
-<p>Если эта защита мешает открыть сайт, вы можете разрешить его. Проверка имени, срока действия, подписи и отзыва сертификата продолжит работать.</p>
-<p id="privacy"></p>
-<section id="one-shot" hidden>
-<button id="open-once">Открыть эту страницу один раз</button>
-<p>Разрешить обе дополнительные проверки для одного перехода в этой вкладке без сохранения исключения. Другой URL, редиректы и вложенные ресурсы требуют отдельного разрешения. Неиспользованное разрешение истекает через 60 секунд.</p>
-</section>
-<section aria-labelledby="page-heading">
-<h2 id="page-heading">На этой странице</h2>
-<p id="coverage">Показаны запросы этой вкладки, для которых получен результат проверки этого УЦ. Отсутствие записей не подтверждает безопасность сайта. Подробности сохраняются для 20 последних вариантов запросов.</p>
-<div id="domains"></div>
-<button id="select-blocked">Выбрать заблокированные домены</button>
-<button id="clear-selection">Снять выбор</button>
-</section>
-<h2>Разрешить выбранные сайты</h2>
-<p>Выберите домены выше или добавьте их вручную. Разрешение применяется только после нажатия кнопки.</p>
-<details><summary>Добавить домены вручную</summary>
-<label for="hosts">Сайты для исключения — по одному в строке</label>
-<textarea id="hosts" rows="4" spellcheck="false" autocomplete="off" placeholder="example.ru"></textarea>
-</details>
-<details>
-<summary>Параметры исключения</summary>
-<label for="scope">Что разрешить</label>
-<select id="scope">
-<option value="all">Использование этого УЦ без ограничений зоны и SCT</option>
-<option value="zone">Только домен вне .ru / .su / .рф — SCT проверять</option>
-<option value="ct">Только отсутствие подходящего SCT — зону проверять</option>
-</select>
-<p>Исключение действует для точного имени сайта и только для этого УЦ. Поддомены автоматически не разрешаются.</p>
-<label for="duration">Срок разрешения</label>
-<select id="duration"><option value="session">До закрытия браузера</option><option value="hour">На один час</option><option value="permanent" selected>Постоянно</option></select>
-</details>
-<label><input type="checkbox" id="reload" checked> После разрешения вернуться на сайт</label>
-<button id="allow">Разрешить выбранные сайты</button>
-<a id="return" hidden>Вернуться на сайт</a>
 <h2>Режим проверки</h2>
 <label><input type="checkbox" id="hardened"> Требовать SCT двух независимых операторов, включая Yandex</label>
 <p>Режим действует для всех сайтов с этим УЦ. Исключение SCT остаётся доступным в любом режиме.</p>
@@ -72,5 +66,10 @@
 <ul id="exceptions"></ul>
 <p>При изменении исключений активные сетевые соединения закрываются. Незавершённые загрузки могут прерваться; страницу нужно открыть повторно.</p>
 </div>
+<details id="one-shot" hidden><summary>Открыть страницу без сохранения исключения</summary>
+<button id="open-once">Открыть эту страницу один раз</button>
+<p>Разрешение действует для одного перехода в этой вкладке. Перенаправления и вложенные ресурсы требуют отдельного разрешения.</p>
+</details>
+<a id="return" hidden>Вернуться на сайт</a>
 </main>
 </html>

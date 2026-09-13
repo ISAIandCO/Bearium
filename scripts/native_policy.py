@@ -261,6 +261,7 @@ def generated_files():
     result = {Path("security/certverifier/RufoxCTLogs.h"): log_header()}
     logs = json.loads((NATIVE / "ct-log-list.json").read_text())
     metadata = {"version": logs["version"], "timestamp": logs["log_list_timestamp"], "logs": {}}
+    metadata["rootFingerprint"] = json.loads((ROOT / "certificates/ministry-ca-lock.json").read_text())["der_sha256"]
     for operator in logs["operators"]:
         for log in operator["logs"]:
             identity = base64.b64decode(log["log_id"]).hex()

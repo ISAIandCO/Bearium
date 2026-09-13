@@ -55,12 +55,26 @@ function channel(id, host='example.ru', state='blocked') {
 }
 function begin(browser, request) {service.progress(browser,{isTopLevel:true},request,5);}
 function response(request) {Services.obs.notifyObservers(request,'http-on-examine-response');}
-const first=channel(1); begin(a,first); response(first); response(first);
+const first=channel(1);
+first.securityInfo.handshakeCertificates=[{
+  sha256Fingerprint:'AA:BB',subjectName:'CN=example.ru',issuerName:'CN=Issuer',serialNumber:'01',
+  validity:{notBefore:1000000,notAfter:2000000},
+}];
+Object.defineProperty(first.securityInfo, 'serverCert', {get(){throw new Error('failed handshake');}});
+begin(a,first); response(first); response(first);
+assert.equal(service.snapshot(a).mainReport.certificate.sha256Fingerprint,'AA:BB');
+assert.equal(service.snapshot(a).mainReport.certificate.subjectName,'CN=example.ru');
+assert.equal(service.snapshot(a).mainReport.certificate.notBefore,'1970-01-01T00:00:01.000Z');
 service.progress(a,{isTopLevel:true},first,2);
 assert.equal(service.snapshot(a).blocked,1,'one request must not count twice');
 assert.equal(service.snapshot(b).total,0,'tabs are isolated');
 const late=channel(1,'late.ru');late.loadInfo.externalContentPolicyType=3;Services.obs.notifyObservers(late,'http-on-modify-request');
-const next=channel(1,'new.ru','allowed');begin(a,next);response(next);response(late);
+const next=channel(1,'new.ru','allowed');
+next.securityInfo.serverCert={sha256Fingerprint:'CC:DD',subjectName:'x'.repeat(9000)};
+next.securityInfo.handshakeCertificates=[{sha256Fingerprint:'WRONG'}];
+begin(a,next);response(next);response(late);
+assert.equal(service.snapshot(a).mainReport.certificate.sha256Fingerprint,'CC:DD');
+assert.equal(service.snapshot(a).mainReport.certificate.subjectName.length,8192);
 assert.equal(service.snapshot(a).total,1,'old responses cannot populate a new navigation');
 assert.equal(service.snapshot(a).state,'allowed');
 for(let i=0;i<105;i++) {const r=channel(1);r.loadInfo.externalContentPolicyType=3;Services.obs.notifyObservers(r,'http-on-modify-request');response(r);}
@@ -76,6 +90,7 @@ Services.obs.notifyObservers(failed,'http-on-rufox-request');
 Services.obs.notifyObservers(failed,'http-on-rufox-security-info');
 assert.equal(service.snapshot(a).blocked,1);
 assert.equal(service.snapshot(a).blockedDomains,1);
+assert.equal(service.snapshot(a).mainReport.certificate,null,'missing certificate must not discard the policy result');
 assert.equal(service.errorPage(a,failed.URI.spec),'about:bearium-protection#warning=1&url='+encodeURIComponent(failed.URI.spec));
 assert.equal(service.errorPage(b,failed.URI.spec),null,'another tab cannot reuse a report');
 assert.equal(service.errorPage(a,'https://different.com/'),null);
