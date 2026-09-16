@@ -106,10 +106,14 @@ heartbeat_pid="$!"
 # not see a path that does not exist yet. Let bootstrap create its conventional
 # $PWD/mozconfig file, which is the path exported by the workflow.
 unset MOZCONFIG ANDROID_HOME ANDROID_SDK_ROOT
+# Bootstrap probes the host's default Android target, independently of our ABI.
+# Install the ABI-specific ONNX from the official release graph afterwards;
+# prepare_onnx_runtime.py makes it mandatory in the actual build's mozconfig.
 set +e
 PYTHONUNBUFFERED=1 stdbuf -oL -eL \
   ./mach --no-interactive bootstrap \
-    --application-choice="GeckoView/Firefox for Android"
+    --application-choice="GeckoView/Firefox for Android" \
+    --exclude onnxruntime-x86_64-linux-android
 bootstrap_status="$?"
 set -e
 

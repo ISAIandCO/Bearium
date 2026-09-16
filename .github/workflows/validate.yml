@@ -30,3 +30,30 @@ jobs:
         run: |
           python3 scripts/patch_firefox.py \
             --check-remote "$SOURCE_REPOSITORY/raw-file/$SOURCE_TAG"
+
+      - name: Verify official release ONNX artifacts for all Android ABIs
+        env:
+          FIREFOX_REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import shutil
+          import subprocess
+          import tempfile
+          import urllib.request
+          from pathlib import Path
+          from scripts.prepare_onnx_runtime import TARGETS, artifact_url, resolve_toolchain, verify_library
+
+          for target in TARGETS:
+              decision, task = resolve_toolchain(os.environ['FIREFOX_REVISION'], target)
+              name = f'onnxruntime-{target}'
+              with tempfile.TemporaryDirectory() as directory:
+                  archive = Path(directory) / 'runtime.tar.zst'
+                  url = artifact_url(task, f'build/{name}.tar.zst')
+                  with urllib.request.urlopen(url, timeout=60) as response, archive.open('wb') as output:
+                      shutil.copyfileobj(response, output)
+                  subprocess.run(['tar', '--zstd', '-xf', str(archive), '-C', directory,
+                                  f'{name}/libonnxruntime.so'], check=True)
+                  verify_library(Path(directory) / name / 'libonnxruntime.so', target)
+              print(f'Verified {target}: decision={decision} task={task}', flush=True)
+          PY

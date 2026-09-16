@@ -140,6 +140,7 @@ jobs:
         working-directory: ${{ runner.temp }}/firefox-source
         env:
           RFIREFOX_BOOTSTRAP_HEARTBEAT_SECONDS: "60"
+          FIREFOX_REVISION: ${{ needs.resolve.outputs.revision }}
         run: |
           # Mozilla stores the downloaded NDK archive under mozboot, but unzip
           # extracts it with ~/.mozbuild as its working directory. A restored
@@ -152,6 +153,10 @@ jobs:
             /home/runner/.mozbuild/android-ndk-r29
           bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"
           test -f "$MOZCONFIG"
+          python3 "$GITHUB_WORKSPACE/scripts/prepare_onnx_runtime.py" \
+            --source "$FIREFOX_SOURCE_DIR" --revision "$FIREFOX_REVISION" \
+            --target "$RFIREFOX_TARGET" --mozconfig "$MOZCONFIG" \
+            --output "$RUNNER_TEMP/bearium-onnx"
           # GNU config.guess identifies the x86_64 runner as
           # x86_64-pc-linux-gnu, while Rust uses x86_64-unknown-linux-gnu.
           # New Rust releases can expose several compatible GNU/Linux targets,
