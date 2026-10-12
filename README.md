@@ -336,6 +336,19 @@ Bearium собирается из исходников стабильной rele
 </details>
 
 <details>
+<summary><b>Как собрать тестовый pre APK?</b></summary>
+
+<br>
+
+В [Actions → Build Bearium pre (arm64-v8a)](https://github.com/ISAIandCO/Bearium/actions/workflows/build-pre.yml) нажмите **Run workflow**. Для workflow можно оставить ветку `main`, а в поле `source_ref` указать ветку, тег или коммит Bearium для проверки — по умолчанию `dev`.
+
+Этот workflow собирает только **arm64-v8a**. После успешного запуска APK, SHA-256, отчёт о подписи и `source.json` доступны в **Artifacts** запуска в течение 30 дней. Метаданные содержат фактический коммит Bearium, ревизию Firefox и SHA-256 загруженного архива исходников.
+
+Тестовый APK использует существующий пакет `app.bearium.browser.dev` и публичный ключ разработки, устанавливается рядом со стабильным Bearium и предназначен для тестирования. Workflow не публикует GitHub Releases и не запускает публикацию в Google Play.
+
+</details>
+
+<details>
 <summary><b>Как проверить APK?</b></summary>
 
 <br>
