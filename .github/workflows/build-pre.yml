@@ -1,0 +1,259 @@
+name: Build Bearium pre (arm64-v8a)
+run-name: Bearium pre from ${{ inputs.source_ref }} (arm64-v8a)
+
+# Keep this entry point on main so GitHub exposes Run workflow. Browser changes
+# are checked out independently from source_ref, which defaults to dev.
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Bearium branch, tag or commit to test'
+        required: true
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bearium-pre-${{ github.ref }}-${{ inputs.source_ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build test APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      # Reuse the existing development package/key path; no production secrets.
+      BEARIUM_PRODUCTION: "0"
+      MOZ_OBJDIR_NAME: obj-bearium-pre-arm64-v8a
+      RFIREFOX_DEBUG_CERT_SHA256: d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f
+      RFIREFOX_TARGET: aarch64-linux-android
+      RFIREFOX_TARGET_ABI: arm64-v8a
+      TARGET_ABI: arm64-v8a
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          persist-credentials: false
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -v
+
+      - name: Resolve latest stable Firefox Android source
+        id: source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          python3 scripts/resolve_firefox_source.py --format json > source.json
+          python3 - <<'PYCODE'
+          import datetime, json, os, subprocess
+          data = json.load(open('source.json'))
+          data.update(
+              build_kind='pre', abi='arm64-v8a', application_id='app.bearium.browser.dev',
+              build_date=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S'),
+              source_ref=os.environ['SOURCE_REF'],
+              source_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              workflow_commit=os.environ['GITHUB_SHA'],
+              run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+              signing='public development key',
+          )
+          with open('source.json', 'w') as output:
+              json.dump(data, output, indent=2, sort_keys=True)
+              output.write('\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for key in ('version', 'revision', 'archive_url'):
+                  print(f'{key}={data[key]}', file=output)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              print(f"MOZ_BUILD_DATE={data['build_date']}", file=output)
+          PYCODE
+
+      - name: Set build paths
+        run: |
+          echo "FIREFOX_SOURCE_DIR=$RUNNER_TEMP/firefox-source" >> "$GITHUB_ENV"
+          echo "MOZCONFIG=$RUNNER_TEMP/firefox-source/mozconfig" >> "$GITHUB_ENV"
+          echo "RFIREFOX_DEBUG_KEYSTORE=$GITHUB_WORKSPACE/signing/rfirefox-debug.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=" >> "$GITHUB_ENV"
+
+      - name: Verify the repository development key
+        run: |
+          test -f "$RFIREFOX_DEBUG_KEYSTORE"
+          fingerprint="$(
+            keytool -list -v \
+              -keystore "$RFIREFOX_DEBUG_KEYSTORE" \
+              -storepass android \
+              -alias androiddebugkey |
+              sed -n 's/^[[:space:]]*SHA256: //p' |
+              tr -d ':' |
+              tr '[:upper:]' '[:lower:]'
+          )"
+          test "$fingerprint" = "$RFIREFOX_DEBUG_CERT_SHA256"
+
+      - name: Free space on the ephemeral GitHub runner
+        if: runner.environment == 'github-hosted'
+        run: |
+          sudo rm -rf -- \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes mercurial unzip
+
+      - name: Cache Mozilla toolchains and Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mozbuild
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: firefox-android-pre-arm64-v8a-v1-${{ runner.os }}-${{ steps.source.outputs.revision }}
+          restore-keys: |
+            firefox-android-pre-arm64-v8a-v1-${{ runner.os }}-
+
+      - name: Download the exact stable source archive
+        env:
+          ARCHIVE_URL: ${{ steps.source.outputs.archive_url }}
+          EXPECTED_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          archive="$RUNNER_TEMP/firefox-source.zip"
+          unpacked="$RUNNER_TEMP/firefox-unpacked"
+          curl --fail --location --show-error \
+            --retry 5 --retry-all-errors --connect-timeout 30 \
+            --output "$archive" "$ARCHIVE_URL"
+          sha256sum "$archive" > "$RUNNER_TEMP/firefox-source.sha256"
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          data = json.load(open('source.json'))
+          data['archive_sha256'] = (Path(os.environ['RUNNER_TEMP']) / 'firefox-source.sha256').read_text().split()[0]
+          with open('source.json', 'w') as output:
+              json.dump(data, output, indent=2, sort_keys=True)
+              output.write('\n')
+          PYCODE
+          mkdir -p "$unpacked"
+          unzip -q "$archive" -d "$unpacked"
+          source_root="$(find "$unpacked" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$source_root"
+          mv "$source_root" "$FIREFOX_SOURCE_DIR"
+          test "$(tr -d '\r\n' < "$FIREFOX_SOURCE_DIR/browser/config/version.txt")" = "$EXPECTED_VERSION"
+          rm -f -- "$archive"
+
+      - name: Verify and apply Bearium patches
+        run: python3 scripts/patch_firefox.py --source "$FIREFOX_SOURCE_DIR"
+
+      - name: Bootstrap GeckoView and Fenix toolchains
+        working-directory: ${{ runner.temp }}/firefox-source
+        env:
+          RFIREFOX_BOOTSTRAP_HEARTBEAT_SECONDS: "60"
+          FIREFOX_REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          # Restored NDK paths otherwise cause an interactive unzip prompt.
+          test "$HOME" = "/home/runner"
+          rm -rf -- \
+            /home/runner/.mozbuild/mozboot \
+            /home/runner/.mozbuild/android-ndk-r29
+          bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"
+          test -f "$MOZCONFIG"
+          python3 "$GITHUB_WORKSPACE/scripts/prepare_onnx_runtime.py" \
+            --source "$FIREFOX_SOURCE_DIR" --revision "$FIREFOX_REVISION" \
+            --target "$RFIREFOX_TARGET" --mozconfig "$MOZCONFIG" \
+            --output "$RUNNER_TEMP/bearium-onnx"
+          sed -i -E \
+            -e '/^[[:space:]]*ac_add_options[[:space:]]+--host=/d' \
+            -e '/^[[:space:]]*ac_add_options[[:space:]]+--target=/d' \
+            "$MOZCONFIG"
+          {
+            echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/$MOZ_OBJDIR_NAME"
+            echo "ac_add_options --host=x86_64-unknown-linux-gnu"
+            echo "ac_add_options --target=$RFIREFOX_TARGET"
+            echo "ac_add_options --enable-release"
+            echo "ac_add_options --disable-debug"
+            echo "ac_add_options --disable-debug-symbols"
+            echo "ac_add_options --enable-optimize"
+          } >> "$MOZCONFIG"
+          test "$(grep -Ec '^[[:space:]]*ac_add_options[[:space:]]+--host=' "$MOZCONFIG")" -eq 1
+          test "$(grep -Ec '^[[:space:]]*ac_add_options[[:space:]]+--target=' "$MOZCONFIG")" -eq 1
+
+      - name: Upload bootstrap diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bearium-pre-bootstrap-arm64-v8a-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rfirefox-bootstrap/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Build patched GeckoView
+        working-directory: ${{ runner.temp }}/firefox-source
+        run: ./mach build
+
+      - name: Stop GeckoView Gradle daemons before Fenix packaging
+        working-directory: ${{ runner.temp }}/firefox-source
+        run: |
+          ./gradlew --stop
+          ./gradlew --status || true
+          free -h
+
+      - name: Assemble test APK with the public development key
+        working-directory: ${{ runner.temp }}/firefox-source
+        env:
+          GRADLE_INVOKED_WITHIN_MACH_BUILD: "1"
+        run: ./mach gradle --no-daemon --max-workers=2 fenix:assembleRelease
+
+      - name: Collect and verify the test APK
+        env:
+          FIREFOX_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          output_dir="$FIREFOX_SOURCE_DIR/$MOZ_OBJDIR_NAME/gradle/build/mobile/android/fenix/app/outputs/apk/release"
+          artifact_dir="$GITHUB_WORKSPACE/pre-artifacts"
+          mkdir -p "$artifact_dir"
+          apksigner="$(find ~/.mozbuild -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt2="$(find ~/.mozbuild -type f -name aapt2 -print | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          test -x "$aapt2"
+          mapfile -t source_apks < <(
+            find "$output_dir" -type f -name "*-$TARGET_ABI-release.apk" -print | sort
+          )
+          if [[ "${#source_apks[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one $TARGET_ABI test APK."
+            exit 1
+          fi
+          apk_name="Bearium-$FIREFOX_VERSION-pre-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$TARGET_ABI.apk"
+          test_apk="$artifact_dir/$apk_name"
+          cp -- "${source_apks[0]}" "$test_apk"
+          python3 scripts/verify_android_apk.py --apk "$test_apk" --abi "$TARGET_ABI"
+          signer_info="$("$apksigner" verify --verbose --print-certs "$test_apk")"
+          printf '%s\n' "$signer_info" > "$test_apk.certificate.txt"
+          signer_sha256="$(printf '%s\n' "$signer_info" | python3 scripts/parse_apksigner_output.py)"
+          test "$signer_sha256" = "$RFIREFOX_DEBUG_CERT_SHA256"
+          badging="$("$aapt2" dump badging "$test_apk")"
+          grep -Fq "package: name='app.bearium.browser.dev'" <<< "$badging"
+          grep -Fq "versionName='$FIREFOX_VERSION'" <<< "$badging"
+          grep -Fq "native-code: '$TARGET_ABI'" <<< "$badging"
+          if grep -Eq '^application-(debuggable|testOnly)' <<< "$badging"; then
+            echo "::error::Test APK unexpectedly requires debug/test-only installation."
+            exit 1
+          fi
+          (cd "$artifact_dir" && sha256sum "$apk_name") > "$test_apk.sha256"
+          cp source.json "$artifact_dir/source.json"
+          {
+            echo "### Bearium pre: arm64-v8a"
+            echo "Download the APK and source.json from this run's Artifacts."
+            echo "Package: app.bearium.browser.dev (installs alongside the stable app)."
+            echo "Signed with the public development key; for testing only."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test APK and source identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: bearium-pre-arm64-v8a-${{ steps.source.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pre-artifacts/
+          if-no-files-found: error
+          retention-days: 30
