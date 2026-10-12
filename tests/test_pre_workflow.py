@@ -39,11 +39,43 @@ class PreWorkflowTests(unittest.TestCase):
         self.assertIn("RFIREFOX_TARGET_ABI: arm64-v8a", self.workflow)
         self.assertNotIn("matrix:", self.workflow)
         self.assertIn("package: name='app.bearium.browser.dev'", self.workflow)
-        self.assertIn('test "$signer_sha256" = "$RFIREFOX_DEBUG_CERT_SHA256"', self.workflow)
+        self.assertIn('if [[ "$signer_sha256" != "$RFIREFOX_DEBUG_CERT_SHA256" ]]', self.workflow)
         self.assertIn('verify_android_apk.py --apk "$test_apk" --abi "$TARGET_ABI"', self.workflow)
         self.assertLess(self.workflow.index("prepare_onnx_runtime.py"),
                         self.workflow.index("run: ./mach build"))
         self.assertIn("name: bearium-pre-arm64-v8a-", self.workflow)
+
+    def test_apk_checks_report_the_failed_contract(self):
+        # Run the workflow's actual checks, with Android tools represented by
+        # their text output. A mismatched version must not just exit silently.
+        start = self.workflow.index('          if [[ "$signer_sha256" !=')
+        end = self.workflow.index('          (cd "$artifact_dir"', start)
+        script = textwrap.dedent(self.workflow[start:end])
+        digest = "a" * 64
+        valid = "package: name='app.bearium.browser.dev' versionName='157.0.1'\nnative-code: 'arm64-v8a'"
+        cases = (
+            (digest, valid, None),
+            ("b" * 64, valid, "signer"),
+            (digest, valid.replace("browser.dev", "browser"), "application ID"),
+            (digest, valid.replace("157.0.1", "null"), "versionName"),
+            (digest, valid.replace("arm64-v8a", "x86_64"), "native code"),
+            (digest, valid + "\napplication-debuggable", "debug/test-only"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            aapt = Path(directory) / "aapt2"
+            aapt.write_text('#!/bin/sh\nprintf "%s\\n" "$APK_BADGING"\n')
+            aapt.chmod(0o755)
+            for signer, badging, error in cases:
+                with self.subTest(error=error):
+                    result = subprocess.run(["bash", "-e", "-c", script], capture_output=True, text=True, env={
+                        **os.environ, "signer_sha256": signer, "RFIREFOX_DEBUG_CERT_SHA256": digest,
+                        "aapt2": str(aapt), "test_apk": "test.apk", "APK_BADGING": badging,
+                        "FIREFOX_VERSION": "157.0.1", "TARGET_ABI": "arm64-v8a",
+                    })
+                    self.assertEqual(result.returncode, 1 if error else 0)
+                    if error:
+                        self.assertIn("::error::", result.stdout)
+                        self.assertIn(error, result.stdout)
 
     def test_source_metadata_uses_checked_out_code_instead_of_workflow_commit(self):
         script = textwrap.dedent(self.workflow.split("<<'PYCODE'\n", 1)[1].split("          PYCODE", 1)[0])

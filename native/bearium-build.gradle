@@ -4,6 +4,11 @@ android.defaultConfig.with {
     buildConfigField 'boolean', 'TELEMETRY', 'false'
     buildConfigField 'boolean', 'CRASH_REPORTING', 'false'
 }
+// Fenix's releaseVersionName is null without -PversionName. Use the same source
+// version as Gecko for both development and production release APKs.
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    variant.outputs.each { output -> output.versionName.set(gradle.mozconfig.substs.MOZ_APP_VERSION) }
+}
 if (System.getenv("BEARIUM_PRODUCTION") == "1") {
     def code = System.getenv("BEARIUM_VERSION_CODE")
     if (!(code ==~ /[1-9][0-9]{0,9}/) || code.toLong() > 2100000000L) {

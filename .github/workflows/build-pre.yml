@@ -232,11 +232,24 @@ jobs:
           signer_info="$("$apksigner" verify --verbose --print-certs "$test_apk")"
           printf '%s\n' "$signer_info" > "$test_apk.certificate.txt"
           signer_sha256="$(printf '%s\n' "$signer_info" | python3 scripts/parse_apksigner_output.py)"
-          test "$signer_sha256" = "$RFIREFOX_DEBUG_CERT_SHA256"
+          if [[ "$signer_sha256" != "$RFIREFOX_DEBUG_CERT_SHA256" ]]; then
+            echo "::error::Unexpected test APK signer: $signer_sha256; expected $RFIREFOX_DEBUG_CERT_SHA256."
+            exit 1
+          fi
           badging="$("$aapt2" dump badging "$test_apk")"
-          grep -Fq "package: name='app.bearium.browser.dev'" <<< "$badging"
-          grep -Fq "versionName='$FIREFOX_VERSION'" <<< "$badging"
-          grep -Fq "native-code: '$TARGET_ABI'" <<< "$badging"
+          printf '%s\n' "$badging" | sed -n -e '/^package:/p' -e '/^native-code:/p' -e '/^application-/p'
+          if ! grep -Fq "package: name='app.bearium.browser.dev'" <<< "$badging"; then
+            echo "::error::Unexpected test APK application ID; expected app.bearium.browser.dev."
+            exit 1
+          fi
+          if ! grep -Fq "versionName='$FIREFOX_VERSION'" <<< "$badging"; then
+            echo "::error::Unexpected test APK versionName; expected $FIREFOX_VERSION."
+            exit 1
+          fi
+          if ! grep -Fq "native-code: '$TARGET_ABI'" <<< "$badging"; then
+            echo "::error::Unexpected test APK native code; expected only $TARGET_ABI."
+            exit 1
+          fi
           if grep -Eq '^application-(debuggable|testOnly)' <<< "$badging"; then
             echo "::error::Test APK unexpectedly requires debug/test-only installation."
             exit 1
