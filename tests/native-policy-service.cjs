@@ -31,7 +31,8 @@ const Services = {
   },
 };
 const context = { Services, BrowsingContext: { get: id => contexts.get(id) },
-  Ci: { nsIWebProgressListener: { STATE_START:1, STATE_STOP:2, STATE_IS_NETWORK:4 },
+  Ci: { nsIWebProgressListener: { STATE_START:1, STATE_STOP:2, STATE_IS_NETWORK:4,
+    STATE_IS_SECURE:8, STATE_CERT_USER_OVERRIDDEN:16 },
     nsIHttpChannel:{}, nsIChannel:{}, nsITransportSecurityInfo:{},
     nsIContentPolicy:{TYPE_DOCUMENT:6}, nsIHttpChannelInternal:{} },
   Date: class extends Date { static now() { return clock; } },
@@ -50,7 +51,7 @@ function channel(id, host='example.ru', state='blocked') {
   return {loadInfo:{browsingContextID:id, externalContentPolicyType:6,
       originAttributes:{privateBrowsingId:0}}, QueryInterface(){return this;},
     grants:0, grantRufoxOneShot(){this.grants++;},
-    URI:{asciiHost:host,spec:`https://${host}/`,specIgnoringRef:`https://${host}/`,schemeIs:s=>s==='https'},
+    URI:{scheme:'https',port:-1,asciiHost:host,spec:`https://${host}/`,specIgnoringRef:`https://${host}/`,schemeIs:s=>s==='https'},
     securityInfo:{QueryInterface(){return this;},rufoxPolicy:JSON.stringify({version:1,state,scts:[]})}};
 }
 function begin(browser, request) {service.progress(browser,{isTopLevel:true},request,5);}
@@ -157,6 +158,89 @@ const cancelled=channel(1,'once.ru');permission(cancelled);assert.equal(cancelle
 assert.throws(()=>service.armOneShot(a,'https://user:password@once.ru/',false));
 assert.throws(()=>service.armOneShot(a,'http://once.ru/',false));
 assert(![...normal.values(),...memory.values()].some(v=>v.includes('once.ru')));
+// A built chain belongs to this channel, never the server's alternate list.
+const verified = channel(1, 'verified.ru', 'allowed');
+const leaf = {subjectName:'leaf', issuerName:'issuer', sha256Fingerprint:'LEAF'};
+const root = {subjectName:'root', sha256Fingerprint:'ROOT'};
+verified.securityInfo.serverCert = leaf;
+verified.securityInfo.errorCode = 0;
+verified.securityInfo.securityState = 8;
+verified.securityInfo.succeededCertChain = [leaf, root];
+verified.securityInfo.handshakeCertificates = [{subjectName:'unselected'}];
+begin(a,verified); response(verified);
+assert.equal(service.snapshot(a).mainReport.tlsAccepted,true);
+assert.equal(service.snapshot(a).mainReport.chain.source,'built');
+assert.equal(service.snapshot(a).mainReport.chain.certificates[1].subjectName,'root');
+assert(!JSON.stringify(service.snapshot(a)).includes('unselected'));
+const received = channel(1, 'received.ru');
+received.securityInfo.errorCode = -1;
+received.securityInfo.securityState = 8;
+received.securityInfo.handshakeCertificates = [{subjectName:'received'}];
+begin(a,received); response(received);
+assert.equal(service.snapshot(a).mainReport.chain.source,'received');
+assert.equal(service.snapshot(a).mainReport.tlsAccepted,false);
+const bounded = channel(1, 'bounded.ru', 'exception');
+bounded.securityInfo.rufoxPolicy = JSON.stringify({version:1,state:'exception',ctReason:'verified'});
+bounded.securityInfo.succeededCertChain = Array.from({length:30},()=>({subjectName:'x'.repeat(2000)}));
+begin(a,bounded); response(bounded);
+assert.equal(service.snapshot(a).mainReport.chain.certificates.length,10);
+assert.equal(service.snapshot(a).mainReport.chain.certificates[0].subjectName.length,512);
+assert.equal(service.snapshot(a).mainReport.chain.truncated,true);
+assert.equal(service.snapshot(a).badge,'!','a policy exception must remain visible even with valid SCT');
+const overridden = channel(1,'override.ru','allowed');
+overridden.securityInfo.errorCode = 0; overridden.securityInfo.securityState = 8|16;
+begin(a,overridden); response(overridden);
+assert.equal(service.snapshot(a).mainReport.tlsAccepted,false,'ordinary certificate overrides do not confirm a verified chain');
+const unknownState = channel(1,'unknown.ru','future-state');
+begin(a,unknownState); response(unknownState);
+assert.equal(service.snapshot(a).mainReport,null,'unknown policy states cannot claim successful verification');
+function successfulTrust(host, kind, privateMode=false, port=-1) {
+  const request = channel(1,host,'allowed');
+  request.URI.port = port;
+  if (port !== -1) {
+    request.URI.spec = `https://${host}:${port}/`;
+    request.URI.specIgnoringRef = request.URI.spec;
+  }
+  request.loadInfo.originAttributes.privateBrowsingId = privateMode ? 1 : 0;
+  request.securityInfo.errorCode = 0;
+  request.securityInfo.securityState = 8;
+  request.securityInfo.succeededCertChain = [leaf,root];
+  if (kind === 'other') request.securityInfo.rufoxPolicy = '';
+  return request;
+}
+function startTrust(request) {
+  Services.obs.notifyObservers(request,'http-on-modify-request');
+  begin(a,request);
+}
+const otherTrust = successfulTrust('change.ru','other');
+startTrust(otherTrust); response(otherTrust);
+assert.equal(service.snapshot(a).trustChange,null,'first visits are not trust changes');
+const protectedTrust = successfulTrust('change.ru','protected');
+startTrust(protectedTrust); response(protectedTrust);
+assert.equal(service.snapshot(a).trustChange.from,'other');
+assert.equal(service.snapshot(a).trustChange.to,'protected');
+const otherPort = successfulTrust('change.ru','other',false,444);
+startTrust(otherPort); response(otherPort);
+assert.equal(service.snapshot(a).trustChange,null,'ports do not share trust observations');
+const privateOther = successfulTrust('change.ru','other',true);
+startTrust(privateOther); response(privateOther);
+assert.equal(service.snapshot(a).trustChange,null,'private observations do not inherit normal history');
+const privateProtected = successfulTrust('change.ru','protected',true);
+startTrust(privateProtected); response(privateProtected);
+assert.equal(service.snapshot(a).trustChange.to,'protected');
+Services.obs.notifyObservers(null,'last-pb-context-exited');runDue();
+const nextPrivate = successfulTrust('change.ru','other',true);
+startTrust(nextPrivate); response(nextPrivate);
+assert.equal(service.snapshot(a).trustChange,null,'closing private browsing clears its observations');
+const nextNormal = successfulTrust('change.ru','other');
+startTrust(nextNormal); response(nextNormal);
+assert.equal(service.snapshot(a).trustChange.from,'protected','private cleanup does not erase normal observations');
+const cachedProtected = successfulTrust('change.ru','protected');
+startTrust(cachedProtected); Services.obs.notifyObservers(cachedProtected,'http-on-examine-cached-response');
+assert.equal(service.snapshot(a).trustChange,null,'cache replay is not a new server trust observation');
+response(cachedProtected);
+assert.equal(service.snapshot(a).trustChange.to,'protected','an earlier diagnostic report does not hide a real network observation');
+assert(![...normal.values(),...memory.values()].some(v=>v.includes('change.ru')),'trust observations never persist as preferences');
 service.armOneShot(a,'https://once.ru/',false);
 service.detach(a);assert.equal(service.snapshot(a).available,false);
 service.detach(b);

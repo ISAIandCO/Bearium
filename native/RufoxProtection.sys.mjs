@@ -8,6 +8,9 @@ const tabs = new Map();
 const bindings = new WeakMap();
 const MAX_DOMAINS = 1000;
 const MAX_REPORTS = 20;
+const MAX_CHAIN_CERTS = 10;
+const trustHistory = new Map();
+const privateTrustHistory = new Map();
 let observing = false;
 let policyObserverStarted = false;
 let expiryTimer;
@@ -44,6 +47,7 @@ function expirePermissions() {
 const policyObserver = {
   observe(_subject, topic) {
     if (topic === "last-pb-context-exited") {
+      privateTrustHistory.clear();
       for (const tab of tabs.values()) if (tab.oneShot?.privateMode) clearOneShot(tab);
       Services.prefs.getDefaultBranch("").setStringPref("security.rufox.private_exceptions", "");
       Services.obs.notifyObservers(null, "net:cancel-all-connections");
@@ -53,7 +57,7 @@ const policyObserver = {
   },
 };
 function fresh() {
-  return { domains: new Map(), recent: [], blocked: 0, total: 0, truncated: false, unavailable: false, mainReport: null, url: "" };
+  return { domains: new Map(), recent: [], blocked: 0, total: 0, truncated: false, unavailable: false, mainReport: null, trustChange: null, url: "" };
 }
 function tabFor(channel) {
   const info = channel.loadInfo;
@@ -94,16 +98,11 @@ function bind(channel, tab) {
 }
 // Keep only bounded, plain certificate fields, alongside the existing 20-report
 // per-tab history. Failed TLS handshakes may only expose handshakeCertificates.
-function certificateDetails(info) {
-  let cert;
-  try { cert = info.serverCert; } catch (_) {}
-  if (!cert) {
-    try { cert = info.handshakeCertificates?.[0]; } catch (_) {}
-  }
+function describeCertificate(cert, limit = 8192) {
   if (!cert) return null;
   const result = {};
   for (const field of ["sha256Fingerprint", "subjectName", "issuerName", "serialNumber"]) {
-    try { result[field] = String(cert[field] || "").slice(0, 8192); } catch (_) {}
+    try { result[field] = String(cert[field] || "").slice(0, limit); } catch (_) {}
   }
   for (const field of ["notBefore", "notAfter"]) {
     try {
@@ -113,16 +112,87 @@ function certificateDetails(info) {
   }
   return result;
 }
-function collect(channel) {
+function certificateDetails(info) {
+  let cert;
+  try { cert = info.serverCert; } catch (_) {}
+  if (!cert) {
+    try { cert = info.handshakeCertificates?.[0]; } catch (_) {}
+  }
+  return describeCertificate(cert);
+}
+function certificateChain(info) {
+  let certificates, source = "built";
+  try { certificates = info.succeededCertChain; } catch (_) {}
+  if (!certificates?.length) {
+    source = "received";
+    try { certificates = info.handshakeCertificates; } catch (_) {}
+  }
+  if (!certificates?.length) return null;
+  // The end of a received TLS list is not necessarily a root or a trust anchor.
+  // Full DER blobs never enter the bounded per-tab snapshots.
+  const chain = [];
+  const count = Math.min(MAX_CHAIN_CERTS, certificates.length);
+  for (let index = 0; index < count; index++) {
+    const certificate = describeCertificate(certificates[index], 512);
+    if (certificate) chain.push(certificate);
+  }
+  return { source, truncated: certificates.length > count, certificates: chain };
+}
+function tlsAccepted(info) {
+  try {
+    const W = Ci.nsIWebProgressListener;
+    return info.errorCode === 0 && Boolean(info.securityState & W.STATE_IS_SECURE) &&
+      !(info.securityState & W.STATE_CERT_USER_OVERRIDDEN);
+  } catch (_) { return false; }
+}
+function observeTrust(channel, binding, info) {
+  // A response observation is informational and happens after HTTP. Never use
+  // this history to authorize a request, create an exception or replay a body.
+  if (channel.loadInfo.externalContentPolicyType !== Ci.nsIContentPolicy.TYPE_DOCUMENT ||
+      channel.URI.scheme !== "https" || !tlsAccepted(info) || !info.succeededCertChain?.length) return;
+  const raw = info.rufoxPolicy;
+  let current;
+  if (raw === "") current = "other";  // Explicit native absence, not a missing IPC field.
+  else {
+    let report;
+    try { report = JSON.parse(raw); } catch (_) { return; }
+    if (report.version !== 1 || !["allowed", "exception"].includes(report.state)) return;
+    current = "protected";
+  }
+  const host = channel.URI.asciiHost.toLowerCase().replace(/\.$/, "");
+  const port = channel.URI.port === -1 ? 443 : channel.URI.port;
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return;
+  const key = JSON.stringify([host, port]);
+  const history = channel.loadInfo.originAttributes.privateBrowsingId ? privateTrustHistory : trustHistory;
+  const previous = history.get(key);
+  if (previous && previous !== current) binding.page.trustChange = { host, port, from: previous, to: current };
+  history.delete(key);
+  history.set(key, current);
+  if (history.size > MAX_DOMAINS) history.delete(history.keys().next().value);
+}
+function collect(channel, networkResponse = false) {
   const binding = bindings.get(channel);
-  if (!binding || binding.seen || binding.page !== binding.tab.page) return;
+  if (!binding || binding.page !== binding.tab.page) return;
   const info = channel.securityInfo?.QueryInterface(Ci.nsITransportSecurityInfo);
+  // Cache replay must not claim that a server just changed its trust source.
+  // An earlier TLS report can already have marked this binding as seen.
+  if (networkResponse && info) {
+    try { observeTrust(channel, binding, info); } catch (_) {
+      // An unavailable observation must not suppress the CA policy report.
+    }
+  }
+  if (binding.seen) return;
   const raw = info?.rufoxPolicy;
   if (!raw) return;
   let report;
   try { report = JSON.parse(raw); } catch (_) { return; }
-  if (report.version !== 1) return;
+  if (report.version !== 1 || !["allowed", "blocked", "exception"].includes(report.state)) return;
+  report.tlsAccepted = tlsAccepted(info);
+  try {
+    report.tlsError = info.errorCode;
+  } catch (_) { /* Missing metadata never confirms acceptance of the chain. */ }
   report.certificate = certificateDetails(info);
+  report.chain = certificateChain(info);
   binding.seen = true;
   const page = binding.page;
   const host = channel.URI.asciiHost.toLowerCase().replace(/\.$/, "");
@@ -169,7 +239,7 @@ const observer = {
       } else {
         // Never attach a late response to whichever page happens to be current.
         // Cached requests are bound by the progress listener at STATE_START.
-        collect(channel);
+        collect(channel, topic === "http-on-examine-response");
       }
     } catch (_) { /* Non-HTTP or a channel without TLS metadata. */ }
   },
@@ -261,8 +331,11 @@ export const RufoxProtection = {
     return { available: true, url: page.url, blocked: page.blocked,
       blockedDomains: [...page.domains.values()].filter(d => d.blocked).length,
       domainCount: page.domains.size, mainReport: page.mainReport,
+      trustChange: page.trustChange ? { ...page.trustChange } : null,
       badge: page.blocked > 99 ? "99+" : page.blocked ? String(page.blocked) :
-        page.unavailable ? "?" : page.mainReport?.ctReason === "verified" ? "CT" : "", total: page.total,
+        page.unavailable ? "?" : page.mainReport?.state === "exception" ? "!" :
+        page.mainReport && !page.mainReport.tlsAccepted ? "?" :
+        page.mainReport?.ctReason === "verified" ? "CT" : "", total: page.total,
       truncated: page.truncated,
       state: page.blocked ? "blocked" : page.unavailable ? "unavailable" : [...page.domains.values()].some(
         d => d.reports.some(r => r.state === "exception")) ? "exception" :

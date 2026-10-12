@@ -12,7 +12,11 @@ Result CertVerifier::VerifyRufoxPolicy(
     if (cert.Init(bytes.Elements(), bytes.Length()) != Success) {
       return Result::FATAL_ERROR_INVALID_ARGS;
     }
-    protectedChain |= InputsAreEqual(cert, mRutheniumRootInput);
+    const auto identity = rufox::IdentifyCA(bytes.Elements(), bytes.Length());
+    if (identity == rufox::CAIdentity::Unavailable) {
+      return Result::FATAL_ERROR_LIBRARY_FAILURE;
+    }
+    protectedChain |= identity != rufox::CAIdentity::Other;
   }
   if (!protectedChain) {
     return Success;
