@@ -38,7 +38,7 @@ internal fun RufoxProtectionSummary(engine: EngineSession?, onOpen: () -> Unit) 
                             val mainState = mainReport?.optString("state")
                             val pageSummary = when (mainState) {
                                 "blocked" -> "УЦ Минцифры · страница заблокирована"
-                                "exception", "allowed" -> if (mainReport?.optBoolean("tlsAccepted") == true) {
+                                "exception", "allowed" -> if (mainReport.optBoolean("tlsAccepted") == true) {
                                     if (mainState == "exception") "УЦ Минцифры · действует исключение"
                                     else "УЦ Минцифры · SCT страницы проверен"
                                 } else {
