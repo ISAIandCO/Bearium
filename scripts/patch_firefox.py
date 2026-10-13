@@ -341,6 +341,18 @@ def patch_about_layout(source: str) -> str:
         'app:srcCompat="@drawable/bearium_artwork"', "Bearium about logo")
 
 
+def patch_tab_group_onboarding(source: str) -> str:
+    # PromoCard measures the unweighted illustration before its weighted text.
+    # Bound both Lottie and its static fallback so neither can starve the text.
+    return replace_once(
+        source,
+        'Modifier.height(OnboardingGridItemMinHeight)\n',
+        'Modifier.height(OnboardingGridItemMinHeight)\n'
+        '                        .width(OnboardingGridItemMinHeight)\n',
+        'Tab group onboarding illustration width',
+    )
+
+
 def rebrand_resources(source_root: Path) -> list[Path]:
     changed = []
     app = source_root / "mobile/android/fenix/app/src"
@@ -405,6 +417,7 @@ def copy_ui_branding(source_root: Path) -> list[Path]:
 
 
 TRANSFORMS: dict[Path, Callable[[str], str]] = {
+    Path('mobile/android/fenix/app/src/main/java/org/mozilla/fenix/tabstray/ui/tabitems/TabGroupOnboardingItem.kt'): patch_tab_group_onboarding,
     Path("mobile/android/fenix/app/src/main/res/layout/fragment_about.xml"): patch_about_layout,
     Path("mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebAuthnTokenManager.java"): patch_webauthn,
     Path("mobile/android/fenix/app/src/release/AndroidManifest.xml"): patch_release_manifest,
