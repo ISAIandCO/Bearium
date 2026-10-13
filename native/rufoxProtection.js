@@ -103,6 +103,28 @@ function renderCertificate(report, host, parent) {
     node("dt", label, fields);
     node("dd", value || "Недоступно для этого соединения", fields);
   }
+  const chain = report.chain;
+  if (chain?.certificates?.length) {
+    const detail = node("details", undefined, parent);
+    node("summary", chain.source === "built" ? "Построенная цепочка сертификатов" : "Сертификаты, полученные при TLS-соединении", detail);
+    node("p", chain.source === "received"
+      ? "Этот список не подтверждает доверие к цепочке."
+      : report.state === "blocked" ? "Соединение отклонено политикой Bearium."
+      : !report.tlsAccepted ? "Принятие цепочки TLS-проверкой не подтверждено."
+      : report.state === "exception" ? "Соединение разрешено с пользовательским исключением."
+      : "Цепочка принята при проверке этого соединения.", detail);
+    for (const [index, certificate] of chain.certificates.entries()) {
+      node("h3", index === 0 ? "Сертификат сайта" : `Сертификат ${index + 1}`, detail);
+      const entries = node("dl", undefined, detail);
+      entries.className = "certificate-fields";
+      for (const [label, field] of [["Кому выдан", "subjectName"], ["Кем выдан", "issuerName"],
+        ["SHA-256", "sha256Fingerprint"], ["Действителен до (UTC)", "notAfter"]]) {
+        node("dt", label, entries);
+        node("dd", certificate[field] || "Недоступно", entries);
+      }
+    }
+    if (chain.truncated) node("p", "Показаны первые 10 сертификатов; список сокращён.", detail);
+  }
 }
 function briefReason(report) {
   if (!report) return "Подробности проверки недоступны";
@@ -136,6 +158,18 @@ function refreshPage() {
   const serialized = JSON.stringify(snapshot);
   if (serialized === lastSnapshot) return;
   lastSnapshot = serialized;
+  const change = snapshot.trustChange;
+  $("trust-change").hidden = !change;
+  $("trust-change").textContent = change
+    ? "Источник доверия изменился: " + (change.from === "protected" ? "УЦ Минцифры → другой УЦ." : "другой УЦ → УЦ Минцифры.")
+    : "";
+  const mainReport = snapshot.mainReport;
+  $("main-trust").hidden = !mainReport;
+  $("main-trust").textContent = !mainReport ? "" :
+    mainReport.state === "blocked" ? "Страница · УЦ Минцифры · соединение заблокировано" :
+    !mainReport.tlsAccepted ? "Страница · УЦ Минцифры · принятие TLS-цепочки не подтверждено" :
+    mainReport.state === "exception" ? "Страница · УЦ Минцифры · действует исключение" :
+    "Страница · УЦ Минцифры · SCT проверен";
   $("page-state").textContent = !snapshot.available ? "Состояние исходной вкладки недоступно. Можно разрешить сайт вручную." :
     snapshot.state === "unavailable" ? "Нет результата проверки сертификата страницы. Причину общей ошибки соединения смотрите на странице ошибки." :
     snapshot.total ? `Заблокировано запросов: ${snapshot.blocked}. Доменов: ${snapshot.truncated ? "не менее " : ""}${snapshot.blockedDomains}.` : "Запросов с результатом проверки этого УЦ не обнаружено.";

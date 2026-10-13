@@ -149,3 +149,31 @@ assert.equal(tab.normal.get('security.rufox.exceptions'),'a.com|ct');
 
 tab.windowHandlers.hashchange();
 assert.equal(tab.reloads(),1,'fragment links must initialize the destination view');
+
+function textTree(element) {
+  return [element.textContent || '', ...(element.children || []).flatMap(item =>
+    typeof item === 'string' ? [item] : textTree(item))].join('\n');
+}
+const chainReport = {state:'allowed',zoneAllowed:true,ctReason:'verified',tlsAccepted:true,
+  chain:{source:'built',certificates:[{subjectName:'<script>leaf</script>',sha256Fingerprint:'LEAF'},
+    {subjectName:'chosen root',sha256Fingerprint:'ROOT'}]}};
+const chainPage = page(false,'https://chain.ru/',{available:true,total:1,domains:[
+  {host:'chain.ru',blocked:0,reports:[chainReport]}],mainReport:chainReport},'page');
+assert.match(chainPage.get('main-trust').textContent,/УЦ Минцифры · SCT проверен/);
+assert.match(textTree(chainPage.get('domains')),/chosen root/);
+assert.match(textTree(chainPage.get('domains')),/<script>leaf<\/script>/);
+assert.match(textTree(chainPage.get('domains')),/Цепочка принята/);
+const receivedPage = page(false,'https://chain.ru/',{available:true,domains:[
+  {host:'chain.ru',blocked:0,reports:[{...chainReport,tlsAccepted:false,
+    chain:{source:'received',certificates:[{subjectName:'received'}]}}]}]},'page');
+assert.match(textTree(receivedPage.get('domains')),/не подтверждает доверие/);
+assert.doesNotMatch(textTree(receivedPage.get('domains')),/Цепочка принята/);
+assert.equal(receivedPage.get('main-trust').hidden,true,'protected subresources do not identify the main document');
+const exceptionPage = page(false,'https://chain.ru/',{available:true,domains:[],
+  mainReport:{state:'exception',tlsAccepted:true}},'page');
+assert.match(exceptionPage.get('main-trust').textContent,/действует исключение/);
+const trustChanged = page(false,'https://chain.ru/',{available:true,domains:[],
+  trustChange:{from:'other',to:'protected'}},'page');
+assert.equal(trustChanged.get('trust-change').hidden,false);
+assert.match(trustChanged.get('trust-change').textContent,/другой УЦ → УЦ Минцифры/);
+assert.equal(trustChanged.normal.size,0,'an informational notice grants no exception');

@@ -27,6 +27,8 @@ def validate_source(run, source):
         raise ValueError('Not a stable Firefox version')
     expected='https://hg-edge.mozilla.org/releases/mozilla-release/archive/'+source['revision']+'.zip'
     if source.get('archive_url')!=expected: raise ValueError('Unexpected Mozilla archive URL')
+    if not re.fullmatch('[0-9a-f]{64}',source.get('archive_sha256','')):
+        raise ValueError('Missing source archive SHA-256; rebuild production APKs to record provenance')
 
 
 def main():
@@ -50,7 +52,7 @@ def main():
     print('eligible=true')
     print('run_id='+run_id)
     print('source_json='+json.dumps(source))
-    for key in ('source_commit','version_code','build_date','archive_url','revision','version'):
+    for key in ('source_commit','version_code','build_date','archive_url','archive_sha256','revision','version'):
         print(f'{key}={source[key]}')
 
 if __name__=='__main__': main()

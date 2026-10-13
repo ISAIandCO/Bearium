@@ -92,7 +92,7 @@ def verifier_h(source: str) -> str:
 
 
 def verifier_cpp(source: str) -> str:
-    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "prtime.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
+    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCAIdentity.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "prtime.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
     init = """
   // Rufox extra trust is limited to TLS servers; policy is checked below.
   mTLSServerRootInputs = mThirdPartyRootInputs.Clone();
@@ -197,7 +197,7 @@ def trust_panel(source):
 
 
 def common_socket(source):
-    source = once(source, '#include "CommonSocketControl.h"', '#include "CommonSocketControl.h"\n#include "RutheniumRoot.h"\n#include <cstring>')
+    source = once(source, '#include "CommonSocketControl.h"', '#include "CommonSocketControl.h"\n#include "RufoxCAIdentity.h"')
     return once(source, "  // See where CheckCertHostname() is called in", """  // Rufox: an exception for one host must not authorize another SAN via H2/H3.
   // A separate connection runs the complete policy for the requested host.
   for (const auto& chainCert : mSucceededCertChain) {
@@ -205,8 +205,8 @@ def common_socket(source):
     if (NS_FAILED(chainCert->GetRawDER(der))) {
       return NS_OK;
     }
-    if (der.Length() == sizeof(kRutheniumRussianRootDER) &&
-        memcmp(der.Elements(), kRutheniumRussianRootDER, der.Length()) == 0) {
+    if (mozilla::psm::rufox::IdentifyCA(der.Elements(), der.Length()) !=
+        mozilla::psm::rufox::CAIdentity::Other) {
       return NS_OK;
     }
   }
@@ -215,14 +215,19 @@ def common_socket(source):
 
 
 def token_cache(source):
-    source = once(source, '#include "SSLTokensCache.h"', '#include "SSLTokensCache.h"\n#include "RutheniumRoot.h"\n#include <cstring>')
+    source = once(source, '#include "SSLTokensCache.h"', '#include "SSLTokensCache.h"\n#include "RufoxCAIdentity.h"')
     return once(source, "  if (!readChain(aInfo.mHandshakeCertificatesBytes)) return false;", """  if (!readChain(aInfo.mHandshakeCertificatesBytes)) return false;
+  // Legacy/unclassified tickets cannot prove which CA authorized the session.
+  if (!aInfo.mSucceededCertChainBytes || aInfo.mSucceededCertChainBytes->IsEmpty()) {
+    aToken.Clear();
+    return false;
+  }
   // Rufox: never resume protected-CA sessions (including persisted tokens from
   // older builds). This also prevents 0-RTT before the current policy is checked.
   if (aInfo.mSucceededCertChainBytes) {
     for (const auto& der : *aInfo.mSucceededCertChainBytes) {
-      if (der.Length() == sizeof(kRutheniumRussianRootDER) &&
-          memcmp(der.Elements(), kRutheniumRussianRootDER, der.Length()) == 0) {
+      if (mozilla::psm::rufox::IdentifyCA(der.Elements(), der.Length()) !=
+          mozilla::psm::rufox::CAIdentity::Other) {
         aToken.Clear();
         return false;
       }
@@ -231,8 +236,59 @@ def token_cache(source):
 
 
 def cert_build(source):
-    line = '\nEXPORTS += ["RutheniumRoot.h"]\n'
+    line = '\nEXPORTS += ["RufoxCAIdentity.h", "RufoxPolicyHelpers.h", "RutheniumRoot.h"]\n'
     return source if line in source else source + line
+
+
+def fenix_settings(source):
+    # Change only the default. An explicitly stored user preference still wins.
+    source = once(source, '''appContext.getPreferenceKey(R.string.pref_key_https_only),
+            default = false,''', '''appContext.getPreferenceKey(R.string.pref_key_https_only),
+            default = true,''')
+    source = once(source, '''appContext.getPreferenceKey(R.string.pref_key_telemetry),
+            default = true,''', '''appContext.getPreferenceKey(R.string.pref_key_telemetry),
+            default = BuildConfig.TELEMETRY,''')
+    return once(source, '''key = appContext.getPreferenceKey(R.string.pref_key_enable_contile),
+            default = true,''', '''key = appContext.getPreferenceKey(R.string.pref_key_enable_contile),
+            default = false,''')
+
+
+def glean_helper(source):
+    # Both startup and onboarding use this initializer. The metrics controller's
+    # build flag alone does not prevent Glean's own baseline/lifetime uploads.
+    return once(source, "        uploadEnabled = isTelemetryUploadEnabled,",
+                "        uploadEnabled = BuildConfig.TELEMETRY && isTelemetryUploadEnabled,")
+
+
+def https_only(source):
+    source = once(source, '#include "nsHTTPSOnlyUtils.h"', '#include "nsHTTPSOnlyUtils.h"\n#include "nsITransportSecurityInfo.h"')
+    helper = '''// A TLS refusal is not evidence that an HTTP connection is safe. A successful
+// protected-CA response must not turn its HTTP error into an insecure retry.
+static bool RufoxBlocksHTTPSDowngrade(nsIChannel* channel) {
+  if (!channel) return true;
+  nsCOMPtr<nsITransportSecurityInfo> info;
+  if (NS_FAILED(channel->GetSecurityInfo(getter_AddRefs(info)))) return true;
+  if (!info) return false;  // Preserve connection-error recovery for HTTP-only sites.
+  int32_t error = 0;
+  nsAutoCString policy;
+  return NS_FAILED(info->GetErrorCode(&error)) || error != 0 ||
+         NS_FAILED(info->GetRufoxPolicy(policy)) || !policy.IsEmpty();
+}
+'''
+    anchor = '/* static */\nnsHTTPSOnlyUtils::UpgradeMode nsHTTPSOnlyUtils::GetUpgradeMode(\n    bool aFromPrivateWindow,'
+    source = once(source, anchor, helper + '\n' + anchor)
+    source = once(source, '''  nsCOMPtr<nsIChannel> channel = aDocumentLoadListener->GetChannel();
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+  uint32_t httpsOnlyStatus = loadInfo->GetHttpsOnlyStatus();
+  // Only downgrade''', '''  nsCOMPtr<nsIChannel> channel = aDocumentLoadListener->GetChannel();
+  if (RufoxBlocksHTTPSDowngrade(channel)) return nullptr;
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+  uint32_t httpsOnlyStatus = loadInfo->GetHttpsOnlyStatus();
+  // Only downgrade''')
+    return once(source, '''  // If HTTPS-Only Mode is not enabled, then there is nothing to do here.
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();''', '''  if (RufoxBlocksHTTPSDowngrade(aChannel)) return false;
+  // If HTTPS-Only Mode is not enabled, then there is nothing to do here.
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();''')
 
 
 def install(transforms):
@@ -248,6 +304,9 @@ def install(transforms):
     transforms[Path("security/manager/ssl/CommonSocketControl.cpp")] = common_socket
     transforms[Path("netwerk/base/SSLTokensCache.cpp")] = token_cache
     transforms[Path("security/certverifier/moz.build")] = cert_build
+    transforms[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt")] = fenix_settings
+    transforms[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/GleanHelper.kt")] = glean_helper
+    transforms[Path("dom/security/nsHTTPSOnlyUtils.cpp")] = https_only
     try:
         from . import native_reporting, native_frontend, native_one_shot
     except ImportError:
@@ -270,6 +329,7 @@ def generated_files():
     result[Path("toolkit/content/rufoxLogMetadata.js")] = "const RufoxLogMetadata = " + json.dumps(metadata, ensure_ascii=True) + ";\n"
 
     result[Path("security/certverifier/RufoxPolicyHelpers.h")] = (NATIVE / "RufoxPolicyHelpers.h").read_text()
+    result[Path("security/certverifier/RufoxCAIdentity.h")] = (NATIVE / "RufoxCAIdentity.h").read_text()
     for name in ("rufoxProtection.html", "rufoxProtection.js", "rufoxProtection.css"):
         result[Path("toolkit/content") / name] = (NATIVE / name).read_text()
     result[Path("mobile/shared/modules/geckoview/RufoxProtection.sys.mjs")] = (NATIVE / "RufoxProtection.sys.mjs").read_text()

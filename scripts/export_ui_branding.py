@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1] / 'branding/android'
 SOURCE = ROOT / 'source/ui'
 OUTPUT = ROOT / 'ui/res'
-# Original 155.0.1 VectorDrawable intrinsic sizes, in dp. Preserve proportions by
+# Original Firefox VectorDrawable intrinsic sizes, in dp. Preserve proportions by
 # fitting the approved artwork inside the original viewport, never stretching it.
 ILLUSTRATIONS = {
     'firefox_as_default_banner_illustration': ('default_browser', 78, 53),
@@ -34,6 +34,20 @@ ILLUSTRATIONS = {
     'mozac_ic_kit_tab_groups_list_view': ('tab_groups_list', 78, 68),
     'ic_fx_accounts_avatar': ('welcome', 72, 72),
     'ic_onboarding_welcome': ('welcome', 108, 108),
+    'nova_onboarding_tou': ('mascot', 257, 297),
+    'nova_onboarding_tou_2': ('mascot', 220, 257),
+    'protection_panel_not_secure': ('warning', 100, 100),
+    'protection_panel_not_protected': ('shield_off', 80, 80),
+    'nova_onboarding_marketing': ('mascot', 262, 259),
+    'nova_onboarding_notifications': ('default_browser', 202, 150),
+    'ic_kit_plug_error': ('crash_dark', 200, 150),
+    'kit_plug_error': ('crash_dark', 137, 103),
+    'kit_devices_sync': ('devices_sync', 210, 90),
+    'kit_devices_sync_error': ('devices_sync_error', 242, 90),
+    'nova_onboarding_sync': ('onboarding_sync', 302, 150),
+    'nova_onboarding_sync_qr': ('onboarding_sync_qr', 200, 109),
+    'nova_onboarding_widget': ('onboarding_widget', 206, 150),
+    'ic_onboarding_search_widget': ('onboarding_search_widget', 312, 323),
 }
 ALTERNATIVES = ('retro_2004', 'pixelated', 'cuddling', 'pride', 'flaming', 'minimal', 'momo', 'cool')
 ANDROID = 'http://schemas.android.com/apk/res/android'
@@ -72,7 +86,10 @@ def save(image: Image.Image, name: str, folder: str = 'drawable-xxxhdpi') -> Non
     path = OUTPUT / folder / f'{name}.webp'
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = io.BytesIO()
-    image.save(encoded, format='WEBP', lossless=True, method=4)
+    # The large widget scene needs compact RGB; WebP keeps its alpha lossless.
+    compact_widget = name == 'ic_onboarding_search_widget'
+    image.save(encoded, format='WEBP', lossless=not compact_widget,
+               quality=95 if compact_widget else 80, method=4)
     data = encoded.getvalue()
     if data[:4] != b'RIFF' or data[8:12] != b'WEBP':
         raise ValueError(f'WebP export failed: {name}')
@@ -144,16 +161,17 @@ def export() -> None:
     png = io.BytesIO()
     art.save(png, format='PNG')
     animation = {
-        'v': '5.7.4', 'fr': 30, 'ip': 0, 'op': 60, 'w': 576, 'h': 320, 'nm': 'Bearium tab groups', 'ddd': 0,
+        # Logical dp match the upstream vector, not the 4x embedded bitmap.
+        'v': '5.7.4', 'fr': 30, 'ip': 0, 'op': 60, 'w': 144, 'h': 80, 'nm': 'Bearium tab groups', 'ddd': 0,
         'assets': [{'id': 'bearium_tabs', 'w': 576, 'h': 320, 'u': '', 'e': 1,
                     'p': 'data:image/png;base64,' + base64.b64encode(png.getvalue()).decode()}],
         'layers': [{'ddd': 0, 'ind': 1, 'ty': 2, 'nm': 'Bearium', 'refId': 'bearium_tabs',
                     'ks': {'o': {'a': 0, 'k': 100}, 'r': {'a': 0, 'k': 0},
-                           'p': {'a': 0, 'k': [288, 160, 0]}, 'a': {'a': 0, 'k': [288, 160, 0]},
+                           'p': {'a': 0, 'k': [72, 40, 0]}, 'a': {'a': 0, 'k': [288, 160, 0]},
                            's': {'a': 1, 'k': [
-                               {'t': 0, 's': [98, 98, 100], 'e': [100, 100, 100], 'i': {'x': [0.67], 'y': [1]}, 'o': {'x': [0.33], 'y': [0]}},
-                               {'t': 30, 's': [100, 100, 100], 'e': [98, 98, 100], 'i': {'x': [0.67], 'y': [1]}, 'o': {'x': [0.33], 'y': [0]}},
-                               {'t': 60, 's': [98, 98, 100]}]}},
+                               {'t': 0, 's': [24.5, 24.5, 100], 'e': [25, 25, 100], 'i': {'x': [0.67], 'y': [1]}, 'o': {'x': [0.33], 'y': [0]}},
+                               {'t': 30, 's': [25, 25, 100], 'e': [24.5, 24.5, 100], 'i': {'x': [0.67], 'y': [1]}, 'o': {'x': [0.33], 'y': [0]}},
+                               {'t': 60, 's': [24.5, 24.5, 100]}]}},
                     'ip': 0, 'op': 60, 'st': 0, 'sr': 1, 'bm': 0}],
     }
     (OUTPUT / 'raw').mkdir(exist_ok=True)

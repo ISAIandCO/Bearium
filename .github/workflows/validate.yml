@@ -3,7 +3,7 @@ name: Validate Ruthenium patches
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:

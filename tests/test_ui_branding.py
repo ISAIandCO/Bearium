@@ -2,6 +2,7 @@
 import base64
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -25,7 +26,14 @@ class UIBrandingTest(unittest.TestCase):
                      'firefox_as_default_banner_illustration', 'ic_wordmark_logo',
                      'ic_wordmark_text_normal', 'ic_wordmark_text_private',
                      'ic_logo_wordmark_normal', 'ic_logo_wordmark_private',
-                     'ic_fx_accounts_avatar', 'ic_launcher_private_foreground')
+                     'ic_fx_accounts_avatar', 'ic_launcher_private_foreground',
+                     'nova_onboarding_tou', 'nova_onboarding_tou_2',
+                     'protection_panel_not_secure', 'protection_panel_not_protected',
+                     'nova_onboarding_marketing', 'nova_onboarding_notifications',
+                     'ic_kit_plug_error', 'kit_plug_error',
+                     'kit_devices_sync', 'kit_devices_sync_error',
+                     'nova_onboarding_sync', 'nova_onboarding_sync_qr',
+                     'nova_onboarding_widget', 'ic_onboarding_search_widget')
             for variant in ('main', 'release', 'beta'):
                 for folder in ('drawable', 'drawable-anydpi', 'drawable-mdpi',
                                'drawable-nodpi', 'drawable-night', 'drawable-night-xxhdpi'):
@@ -71,8 +79,29 @@ class UIBrandingTest(unittest.TestCase):
         embedded = data['assets'][0]['p']
         self.assertTrue(embedded.startswith('data:image/png;base64,'))
         self.assertEqual(base64.b64decode(embedded.split(',', 1)[1])[:8], b'\x89PNG\r\n\x1a\n')
-        self.assertEqual((data['w'], data['h']), (576, 320))
+        self.assertEqual((data['w'], data['h']), (144, 80))
+        asset = data['assets'][0]
+        png = base64.b64decode(embedded.split(',', 1)[1])
+        self.assertEqual(struct.unpack('>II', png[16:24]), (asset['w'], asset['h']))
+        # 4x artwork must fit the original logical viewport at every keyframe.
+        for keyframe in data['layers'][0]['ks']['s']['k']:
+            for scale in (keyframe['s'], keyframe.get('e', keyframe['s'])):
+                self.assertLessEqual(asset['w'] * scale[0] / 100, data['w'])
+                self.assertLessEqual(asset['h'] * scale[1] / 100, data['h'])
+        self.assertEqual(data['layers'][0]['ks']['p']['k'][:2], [data['w'] / 2, data['h'] / 2])
         self.assertNotIn('http', embedded)
+
+    def test_tab_group_illustration_cannot_consume_the_whole_row(self):
+        path = Path('mobile/android/fenix/app/src/main/java/org/mozilla/fenix/tabstray/ui/tabitems/TabGroupOnboardingItem.kt')
+        source = (Path(__file__).parent / 'fixtures/TabGroupOnboardingItem.kt').read_text()
+        transform = patch_firefox.TRANSFORMS[path]
+        patched = transform(source)
+        self.assertIn('Modifier.height(OnboardingGridItemMinHeight)\n'
+                      '                        .width(OnboardingGridItemMinHeight)\n', patched)
+        self.assertIn('import androidx.compose.foundation.layout.width', patched)
+        # Same modifier reaches both the animation and reduced-motion fallback.
+        self.assertIn('staticDrawableResource = R.drawable.mozac_ic_kit_tab_groups', patched)
+        self.assertEqual(transform(patched), patched)
 
 
 if __name__ == '__main__':

@@ -34,7 +34,19 @@ internal fun RufoxProtectionSummary(engine: EngineSession?, onOpen: () -> Unit) 
                     if (active) {
                         summary = try {
                             val status = JSONObject(raw ?: "{}")
-                            when (status.optString("state")) {
+                            val mainReport = status.optJSONObject("mainReport")
+                            val mainState = mainReport?.optString("state")
+                            val pageSummary = when (mainState) {
+                                "blocked" -> "УЦ Минцифры · страница заблокирована"
+                                "exception", "allowed" -> if (mainReport.optBoolean("tlsAccepted") == true) {
+                                    if (mainState == "exception") "УЦ Минцифры · действует исключение"
+                                    else "УЦ Минцифры · SCT страницы проверен"
+                                } else {
+                                    "УЦ Минцифры · принятие TLS-цепочки не подтверждено"
+                                }
+                                else -> null
+                            }
+                            val requestSummary = when (status.optString("state")) {
                                 "blocked" -> "Заблокировано запросов: ${status.optInt("blocked")}. " +
                                     "Доменов: ${if (status.optBoolean("truncated")) "не менее " else ""}${status.optInt("blockedDomains")}"
                                 "exception" -> "Действует пользовательское разрешение"
@@ -46,6 +58,16 @@ internal fun RufoxProtectionSummary(engine: EngineSession?, onOpen: () -> Unit) 
                                 "unavailable" -> "? · Проверка сертификата страницы недоступна"
                                 "unobserved" -> "Запросов с этим УЦ не обнаружено"
                                 else -> "Состояние проверки недоступно"
+                            }
+                            val detail = if (pageSummary == null) requestSummary else if (status.optInt("blocked") > 0) {
+                                "$pageSummary. Заблокировано запросов: ${status.optInt("blocked")}."
+                            } else {
+                                pageSummary
+                            }
+                            if (status.optJSONObject("trustChange") != null) {
+                                "Источник доверия изменился. $detail"
+                            } else {
+                                detail
                             }
                         } catch (_: Exception) {
                             "Состояние проверки недоступно"
