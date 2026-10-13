@@ -35,6 +35,7 @@ jobs:
       version_code: ${{ steps.source.outputs.version_code }}
       build_date: ${{ steps.source.outputs.build_date }}
       archive_url: ${{ steps.source.outputs.archive_url }}
+      archive_sha256: ${{ steps.source.outputs.archive_sha256 }}
       revision: ${{ steps.source.outputs.revision }}
       version: ${{ steps.source.outputs.version }}
     steps:
@@ -116,6 +117,7 @@ jobs:
       - name: Download the exact stable source archive
         env:
           ARCHIVE_URL: ${{ needs.resolve.outputs.archive_url }}
+          EXPECTED_ARCHIVE_SHA256: ${{ needs.resolve.outputs.archive_sha256 }}
           EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           archive="$RUNNER_TEMP/firefox-source.zip"
@@ -125,6 +127,11 @@ jobs:
             --connect-timeout 30 \
             --output "$archive" \
             "$ARCHIVE_URL"
+          archive_sha256="$(sha256sum "$archive")"
+          if [[ "${archive_sha256%% *}" != "$EXPECTED_ARCHIVE_SHA256" ]]; then
+            echo "::error::Mozilla source archive differs from the archive used for the production APKs."
+            exit 1
+          fi
           mkdir -p "$unpacked"
           unzip -q "$archive" -d "$unpacked"
           source_root="$(find "$unpacked" -mindepth 1 -maxdepth 1 -type d -print -quit)"

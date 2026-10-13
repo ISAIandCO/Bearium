@@ -143,6 +143,8 @@ jobs:
             --connect-timeout 30 \
             --output "$archive" \
             "$ARCHIVE_URL"
+          archive_sha256="$(sha256sum "$archive")"
+          echo "FIREFOX_ARCHIVE_SHA256=${archive_sha256%% *}" >> "$GITHUB_ENV"
           mkdir -p "$unpacked"
           unzip -q "$archive" -d "$unpacked"
           source_root="$(find "$unpacked" -mindepth 1 -maxdepth 1 -type d -print -quit)"
@@ -240,6 +242,7 @@ jobs:
       - name: Collect and verify the ${{ matrix.abi }} APK
         env:
           RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          SOURCE_JSON: ${{ needs.resolve.outputs.source_json }}
         run: |
           output_dir="$FIREFOX_SOURCE_DIR/$MOZ_OBJDIR_NAME/gradle/build/mobile/android/fenix/app/outputs/apk/release"
           artifact_dir="$GITHUB_WORKSPACE/artifacts-$TARGET_ABI"
@@ -314,6 +317,9 @@ jobs:
             exit 1
           fi
           (cd "$artifact_dir" && sha256sum "$release_name") > "$release_apk.sha256"
+          python3 -m scripts.build_manifest --abi "$TARGET_ABI" \
+            --onnx-root "$RUNNER_TEMP/bearium-onnx" \
+            --output "$artifact_dir/build-manifest-$TARGET_ABI.json"
 
       - name: Upload the ${{ matrix.abi }} APK
         uses: actions/upload-artifact@v4
@@ -377,6 +383,8 @@ jobs:
           RFIREFOX_DEBUG_CERT_SHA256: d7a19050129bbb6e7af6f29dc899a123757ca226ea0ee3c7395c43527592035f
         run: |
           printf '%s\n' "$SOURCE_JSON" > artifacts/source.json
+          python3 -m scripts.build_manifest --merge-dir artifacts \
+            --source-json artifacts/source.json --output artifacts/source.json
           cat > artifacts/build-info.txt <<EOF
           Product: Bearium
           Firefox version: $FIREFOX_VERSION
@@ -430,6 +438,7 @@ jobs:
             artifacts/*.apk
             artifacts/*.apk.sha256
             artifacts/*.certificate.txt
+            artifacts/build-manifest-*.json
             artifacts/build-info.txt
             artifacts/release-notes.md
             artifacts/source.json
@@ -515,6 +524,6 @@ jobs:
             edit_release
           fi
 
-          for asset in artifacts/*.apk artifacts/*.apk.sha256 artifacts/*.certificate.txt artifacts/build-info.txt artifacts/source.json; do
+          for asset in artifacts/*.apk artifacts/*.apk.sha256 artifacts/*.certificate.txt artifacts/build-info.txt artifacts/source.json artifacts/build-manifest-*.json; do
             retry_gh gh release upload "$RELEASE_TAG" "$asset" --clobber
           done

@@ -256,6 +256,13 @@ jobs:
           fi
           (cd "$artifact_dir" && sha256sum "$apk_name") > "$test_apk.sha256"
           cp source.json "$artifact_dir/source.json"
+          if [[ -f scripts/build_manifest.py ]]; then
+            python3 -m scripts.build_manifest --abi "$TARGET_ABI" --source-json source.json \
+              --onnx-root "$RUNNER_TEMP/bearium-onnx" \
+              --output "$artifact_dir/build-manifest-$TARGET_ABI.json"
+          else
+            echo "::notice::The selected source ref predates build manifests."
+          fi
           {
             echo "### Bearium pre: arm64-v8a"
             echo "Download the APK and source.json from this run's Artifacts."

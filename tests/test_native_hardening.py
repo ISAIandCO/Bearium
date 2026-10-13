@@ -158,12 +158,26 @@ int main() {
 
     def test_https_default_preserves_explicit_user_preferences(self):
         source = '''appContext.getPreferenceKey(R.string.pref_key_https_only),
-            default = false,'''
+            default = false,
+appContext.getPreferenceKey(R.string.pref_key_telemetry),
+            default = true,
+key = appContext.getPreferenceKey(R.string.pref_key_enable_contile),
+            default = true,'''
         result = native_policy.fenix_settings(source)
         self.assertIn("default = true", result)
+        self.assertIn("default = BuildConfig.TELEMETRY", result)
+        self.assertIn("pref_key_enable_contile),\n            default = false", result)
         self.assertEqual(native_policy.fenix_settings(result), result)
         with self.assertRaises(ValueError):
             native_policy.fenix_settings("upstream preference key changed")
+
+    def test_glean_initializer_cannot_bypass_build_flag(self):
+        source = "Glean.initialize(\n        uploadEnabled = isTelemetryUploadEnabled,\n)"
+        patched = native_policy.glean_helper(source)
+        self.assertIn("BuildConfig.TELEMETRY && isTelemetryUploadEnabled", patched)
+        self.assertEqual(native_policy.glean_helper(patched), patched)
+        with self.assertRaises(ValueError):
+            native_policy.glean_helper("Glean initializer changed")
 
     def test_shared_ca_identity_is_installed_in_all_three_native_paths(self):
         for transform in (native_policy.verifier_cpp, native_policy.common_socket,

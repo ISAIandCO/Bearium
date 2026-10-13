@@ -242,9 +242,22 @@ def cert_build(source):
 
 def fenix_settings(source):
     # Change only the default. An explicitly stored user preference still wins.
-    return once(source, '''appContext.getPreferenceKey(R.string.pref_key_https_only),
+    source = once(source, '''appContext.getPreferenceKey(R.string.pref_key_https_only),
             default = false,''', '''appContext.getPreferenceKey(R.string.pref_key_https_only),
             default = true,''')
+    source = once(source, '''appContext.getPreferenceKey(R.string.pref_key_telemetry),
+            default = true,''', '''appContext.getPreferenceKey(R.string.pref_key_telemetry),
+            default = BuildConfig.TELEMETRY,''')
+    return once(source, '''key = appContext.getPreferenceKey(R.string.pref_key_enable_contile),
+            default = true,''', '''key = appContext.getPreferenceKey(R.string.pref_key_enable_contile),
+            default = false,''')
+
+
+def glean_helper(source):
+    # Both startup and onboarding use this initializer. The metrics controller's
+    # build flag alone does not prevent Glean's own baseline/lifetime uploads.
+    return once(source, "        uploadEnabled = isTelemetryUploadEnabled,",
+                "        uploadEnabled = BuildConfig.TELEMETRY && isTelemetryUploadEnabled,")
 
 
 def https_only(source):
@@ -292,6 +305,7 @@ def install(transforms):
     transforms[Path("netwerk/base/SSLTokensCache.cpp")] = token_cache
     transforms[Path("security/certverifier/moz.build")] = cert_build
     transforms[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/utils/Settings.kt")] = fenix_settings
+    transforms[Path("mobile/android/fenix/app/src/main/java/org/mozilla/fenix/components/GleanHelper.kt")] = glean_helper
     transforms[Path("dom/security/nsHTTPSOnlyUtils.cpp")] = https_only
     try:
         from . import native_reporting, native_frontend, native_one_shot

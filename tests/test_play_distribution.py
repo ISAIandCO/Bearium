@@ -8,12 +8,14 @@ from scripts.upload_play import release_payload, publish
 class DistributionTests(unittest.TestCase):
     def test_source_must_match_trusted_apk_run(self):
         run={'conclusion':'success','head_branch':'main','path':'.github/workflows/build-android.yml','event':'schedule','head_sha':'a'*40,'run_number':7}
-        source={'source_commit':'a'*40,'version_code':7,'revision':'b'*40,'build_date':'20260912120000','version':'155.0.1','archive_url':'https://hg-edge.mozilla.org/releases/mozilla-release/archive/'+'b'*40+'.zip'}
+        source={'source_commit':'a'*40,'version_code':7,'revision':'b'*40,'build_date':'20260912120000','version':'155.0.1','archive_url':'https://hg-edge.mozilla.org/releases/mozilla-release/archive/'+'b'*40+'.zip','archive_sha256':'d'*64}
         validate_source(run,source)
         for key,value in [('head_branch','feature'),('event','pull_request'),('conclusion','failure'),('head_sha','c'*40),('run_number',8)]:
             altered={**run,key:value}
             with self.assertRaises(ValueError): validate_source(altered,source)
         with self.assertRaises(ValueError): validate_source(run,{**source,'archive_url':'https://example.com/source.zip'})
+        for digest in ('', 'bad', 'D'*64):
+            with self.assertRaises(ValueError): validate_source(run,{**source,'archive_sha256':digest})
 
     def test_rerun_and_downgrade_do_not_change_track(self):
         current={'releases':[{'versionCodes':['7'],'status':'completed'}]}

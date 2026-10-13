@@ -18,6 +18,16 @@ trust anchors или issuer candidates. Если стороннее хранил
 TLS-кэшем; недоступное вычисление SHA-256 не разрешает обход проверки.
 
 HTTPS-Only включён в default-настройке Fenix, без изменения сохранённых значений.
+
+Настройка telemetry для профиля без сохранённого выбора соответствует
+`BuildConfig.TELEMETRY`. Этот же флаг проверяется в общем инициализаторе Glean,
+который используется при запуске и после onboarding: отключение только
+`MetricController` не перекрывало этот отдельный путь инициализации.
+Рекламные ярлыки Contile/Mozilla Ads Client по умолчанию выключены штатным
+`pref_key_enable_contile`; сохранённый выбор пользователя сохраняется.
+В upstream 157.0.1 эту настройку проверяют `TopSitesRefresher.onResume`,
+`TopSitesConfigCreator` и запуск `macTopSitesUpdater` в `HomeActivity`.
+Safe Browsing, общие Remote Settings, обновления расширений и аккаунты не меняются.
 `nsHTTPSOnlyUtils` сохраняет исходную TLS-ошибку вместо HTTP-fallback при отказе
 сертификата и не понижает защищаемое соединение при HTTP-ошибке ответа.
 Отсутствие TLS-результата сохраняет штатную обработку действительно HTTP-only
