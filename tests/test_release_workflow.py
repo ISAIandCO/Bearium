@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import unittest
 import os
+import shlex
 import subprocess
 import tempfile
 import textwrap
+import zipfile
 from pathlib import Path
 
 
@@ -166,19 +168,43 @@ class ReleaseWorkflowPolicyTest(unittest.TestCase):
         )
 
     def test_bootstrap_discards_cached_ndk_before_bootstrap(self) -> None:
-        cleanup = (
-            "rm -rf -- \\\n"
-            "            /home/runner/.mozbuild/mozboot \\\n"
-            "            /home/runner/.mozbuild/android-ndk-r29"
-        )
-        self.assertIn('test "$HOME" = "/home/runner"', self.workflow)
-        self.assertIn(cleanup, self.workflow)
-        self.assertLess(
-            self.workflow.index(cleanup),
-            self.workflow.index(
-                'bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"'
-            ),
-        )
+        for name in ("build-android.yml", "build-play.yml", "build-pre.yml"):
+            with self.subTest(workflow=name), tempfile.TemporaryDirectory() as directory:
+                workflow = WORKFLOW.with_name(name).read_text(encoding="utf-8")
+                self.assertIn('test "$HOME" = "/home/runner"', workflow)
+                start = workflow.index("          rm -rf --")
+                end = workflow.index(
+                    '          bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"',
+                    start,
+                )
+                mozbuild = Path(directory) / ".mozbuild"
+                cleanup = textwrap.dedent(workflow[start:end]).replace(
+                    "/home/runner/.mozbuild", shlex.quote(str(mozbuild))
+                )
+                for cached in ("mozboot", "android-ndk-r29", "android-ndk-r30",
+                               "android-ndk-r31", "android-sdk-linux", "clang"):
+                    path = mozbuild / cached
+                    path.mkdir(parents=True)
+                    (path / "cached").write_text("preserve other toolchains")
+                archive = Path(directory) / "ndk.zip"
+                with zipfile.ZipFile(archive, "w") as output:
+                    output.writestr("android-ndk-r30/wrap.sh/hwasan.sh", "fresh NDK")
+                # A cache containing a newer NDK must not make unzip prompt,
+                # including when cleanup runs again after an interrupted build.
+                for _ in range(2):
+                    subprocess.run(["bash", "-e", "-c", cleanup], check=True)
+                    subprocess.run(
+                        ["unzip", "-q", str(archive)], cwd=mozbuild,
+                        stdin=subprocess.DEVNULL, capture_output=True, check=True,
+                    )
+                    self.assertEqual(
+                        (mozbuild / "android-ndk-r30/wrap.sh/hwasan.sh").read_text(),
+                        "fresh NDK",
+                    )
+                for removed in ("mozboot", "android-ndk-r29", "android-ndk-r31"):
+                    self.assertFalse((mozbuild / removed).exists())
+                for preserved in ("android-sdk-linux", "clang"):
+                    self.assertTrue((mozbuild / preserved / "cached").is_file())
 
     def test_bootstrap_has_live_diagnostics_without_an_extra_timeout(self) -> None:
         bootstrap_script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")

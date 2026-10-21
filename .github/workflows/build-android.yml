@@ -164,13 +164,13 @@ jobs:
         run: |
           # Mozilla stores the downloaded NDK archive under mozboot, but unzip
           # extracts it with ~/.mozbuild as its working directory. A restored
-          # android-ndk-r29 directory therefore triggers an interactive replace
+          # NDK directory therefore triggers an interactive replace
           # prompt and EOF even when mozboot itself was removed.
           # Both paths are disposable on this fixed-home GitHub-hosted runner.
           test "$HOME" = "/home/runner"
           rm -rf -- \
             /home/runner/.mozbuild/mozboot \
-            /home/runner/.mozbuild/android-ndk-r29
+            /home/runner/.mozbuild/android-ndk-r*
           bash "$GITHUB_WORKSPACE/scripts/run_bootstrap_with_heartbeat.sh"
           test -f "$MOZCONFIG"
           python3 "$GITHUB_WORKSPACE/scripts/prepare_onnx_runtime.py" \
