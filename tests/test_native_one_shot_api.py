@@ -8,15 +8,61 @@ import unittest
 from scripts import native_one_shot, native_policy
 
 
+# TLS accessors from FIREFOX-ANDROID_159_0_RELEASE (MPL-2.0).
+# GetApiRedirectToURI is no longer present in this release.
+CHANNEL_SOURCE = '''#include "nsContentUtils.h"
+NS_IMETHODIMP
+HttpBaseChannel::GetTlsFlags(uint32_t* aTlsFlags) {
+  NS_ENSURE_ARG_POINTER(aTlsFlags);
+
+  *aTlsFlags = mTlsFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetTlsFlags(uint32_t aTlsFlags) {
+  mTlsFlags = aTlsFlags;
+  return NS_OK;
+}
+'''
+
+
 class OneShotApiTests(unittest.TestCase):
+    def test_firefox_159_sets_one_shot_flag_before_connection_info(self):
+        # Relevant anchors and immutable connection-info API from Firefox 159.
+        original = '''      mSecurityInfo = mTransaction->SecurityInfo();
+  // Construct connection info object
+  // Finalize ConnectionInfo flags before SpeculativeConnect
+  mConnectionInfo =
+      mConnectionInfo->Mutate()
+          .SetTlsFlags(mTlsFlags)
+          .Finalize();
+'''
+        transforms = {}
+        native_one_shot.install(transforms, native_policy.once)
+        transform = transforms[Path('netwerk/protocol/http/nsHttpChannel.cpp')]
+        patched = transform(original)
+        self.assertIn('  if (mRufoxOneShot) {\n    mTlsFlags |= 0x80000000U;', patched)
+        self.assertLess(patched.index('mTlsFlags |= 0x80000000U;'),
+                        patched.index('// Construct connection info object'))
+        self.assertIn(original[original.index('  // Finalize ConnectionInfo'):], patched)
+        self.assertEqual(transform(patched), patched)
+
+    def test_firefox_159_channel_patch_preserves_tls_accessors(self):
+        transforms = {}
+        native_one_shot.install(transforms, native_policy.once)
+        transform = transforms[Path('netwerk/protocol/http/HttpBaseChannel.cpp')]
+        patched = transform(CHANNEL_SOURCE)
+        self.assertEqual(patched.count('HttpBaseChannel::GrantRufoxOneShot('), 1)
+        getter = CHANNEL_SOURCE[CHANNEL_SOURCE.index('NS_IMETHODIMP'):]
+        getter = getter[:getter.index('\n\nNS_IMETHODIMP')]
+        self.assertIn(getter, patched)
+        self.assertIn('  mTlsFlags = aTlsFlags & ~0x80000000U;', patched)
+        self.assertEqual(transform(patched), patched)
+
     @unittest.skipUnless(shutil.which('g++'), 'g++ required')
     def test_context_and_typed_document_policy(self):
-        original = '''#include "nsContentUtils.h"
-  mTlsFlags = aTlsFlags;
-NS_IMETHODIMP
-HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {
-'''
-        patched = native_one_shot.transform('HttpBaseChannel.cpp', original, native_policy.once)
+        patched = native_one_shot.transform('HttpBaseChannel.cpp', CHANNEL_SOURCE, native_policy.once)
         method = patched[patched.index('HttpBaseChannel::GrantRufoxOneShot('):]
         method = method[:method.index('\nNS_IMETHODIMP')]
         idl = native_one_shot.transform('nsIHttpChannelInternal.idl',

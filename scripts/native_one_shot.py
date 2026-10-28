@@ -26,7 +26,7 @@ def transform(path, s, once):
     elif name == 'HttpBaseChannel.cpp':
         edit('#include "nsContentUtils.h"', '#include "nsContentUtils.h"\n#include "nsXULAppAPI.h"')
         edit('  mTlsFlags = aTlsFlags;', f'  mTlsFlags = aTlsFlags & ~{BIT};')
-        edit('HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {', '''HttpBaseChannel::GrantRufoxOneShot(JSContext* aCx) {
+        edit('HttpBaseChannel::GetTlsFlags(uint32_t* aTlsFlags) {', '''HttpBaseChannel::GrantRufoxOneShot(JSContext* aCx) {
   if (!aCx || !XRE_IsParentProcess() || !nsContentUtils::IsSystemCaller(aCx)) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
@@ -40,7 +40,7 @@ def transform(path, s, once):
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {''')
+HttpBaseChannel::GetTlsFlags(uint32_t* aTlsFlags) {''')
     elif name == 'nsHttpChannel.cpp':
         edit('      mSecurityInfo = mTransaction->SecurityInfo();', '''      mSecurityInfo = mTransaction->SecurityInfo();
       // Report failed handshakes before listeners request an error document.
@@ -49,25 +49,24 @@ HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {''')
         observers->NotifyObservers(static_cast<nsIHttpChannel*>(this),
                                    "http-on-rufox-security-info", nullptr);
       }''')
-        edit('  // Construct connection info object', '''  // Notify before choosing an Alt-Svc route, cache policy or connection pool.
-  if (nsCOMPtr<nsIObserverService> observers = services::GetObserverService()) {
+        edit('  // Construct connection info object', f'''  // Notify before choosing an Alt-Svc route, cache policy or connection pool.
+  if (nsCOMPtr<nsIObserverService> observers = services::GetObserverService()) {{
     observers->NotifyObservers(static_cast<nsIHttpChannel*>(this),
                                "http-on-rufox-request", nullptr);
-  }
+  }}
   // One user-authorized navigation gets its own non-reusable HTTP/1 connection.
   // Neither another path on this host nor a redirect may borrow the permission.
-  if (mRufoxOneShot) {
+  if (mRufoxOneShot) {{
+    mTlsFlags |= {BIT};
     StoreAllowSpdy(false);
     StoreAllowHttp3(false);
     StoreAllowAltSvc(false);
     mCaps |= NS_HTTP_DISALLOW_SPDY | NS_HTTP_DISALLOW_HTTP3 |
              NS_HTTP_DISALLOW_HTTP2_PROXY;
     mCaps &= ~(NS_HTTP_ALLOW_KEEPALIVE | NS_HTTP_ALLOW_SPDY_WITHOUT_KEEPALIVE);
-  }
+  }}
 
   // Construct connection info object''')
-        edit('  mConnectionInfo->SetTlsFlags(mTlsFlags);', f'''  if (mRufoxOneShot) mTlsFlags |= {BIT};
-  mConnectionInfo->SetTlsFlags(mTlsFlags);''')
     elif name == 'nsSocketTransport2.cpp':
         edit('          mOriginAttributes, controlFlags, mTlsFlags, &fd,', f'''          mOriginAttributes, controlFlags,
           mHttpsProxy ? (mTlsFlags & ~{BIT}) : mTlsFlags, &fd,''')
