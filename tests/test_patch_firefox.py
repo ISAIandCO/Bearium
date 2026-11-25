@@ -6,7 +6,35 @@ import unittest
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
-from scripts import patch_firefox
+from scripts import native_reporting, patch_firefox
+
+
+class VerificationPatchTargetsTest(unittest.TestCase):
+    def test_firefox_161_applies_all_targets_except_the_removed_actor(self) -> None:
+        removed = set(native_reporting.LEGACY_VERIFICATION_IPC_PATHS)
+
+        def read_source(path: Path) -> str:
+            if path in removed:
+                raise FileNotFoundError(path)
+            if path == native_reporting.SSL_VERIFICATION_CPP:
+                return "  return SSLServerCertVerificationJob::Dispatch(\n"
+            return ""
+
+        targets = {path for path, _, _ in patch_firefox.patch_sources(read_source)}
+        self.assertEqual(targets, patch_firefox.TRANSFORMS.keys() - removed)
+
+    def test_legacy_firefox_requires_the_entire_verification_actor(self) -> None:
+        missing = native_reporting.LEGACY_VERIFICATION_IPC_PATHS[-1]
+
+        def read_source(path: Path) -> str:
+            if path == native_reporting.SSL_VERIFICATION_CPP:
+                return "    return RemoteProcessCertVerification(\n"
+            if path == missing:
+                raise FileNotFoundError(path)
+            return ""
+
+        with self.assertRaisesRegex(FileNotFoundError, missing.name):
+            list(patch_firefox.patch_sources(read_source))
 
 
 class CertificatePatchTest(unittest.TestCase):
