@@ -1,6 +1,16 @@
 """Carry CA policy diagnostics with the TLS result, including socket-process IPC."""
 from pathlib import Path
 
+SSL_DIR = Path("security/manager/ssl")
+SSL_VERIFICATION_CPP = SSL_DIR / "SSLServerCertVerification.cpp"
+LEGACY_VERIFICATION_IPC_PATHS = (
+    SSL_DIR / "VerifySSLServerCertParent.h",
+    SSL_DIR / "VerifySSLServerCertParent.cpp",
+    SSL_DIR / "VerifySSLServerCertChild.h",
+    SSL_DIR / "VerifySSLServerCertChild.cpp",
+    SSL_DIR / "PVerifySSLServerCert.ipdl",
+)
+
 
 def transform(path, source):
     # Called after the base overlay; this marker makes the additions idempotent.
@@ -92,18 +102,19 @@ NS_IMETHODIMP TransportSecurityInfo::GetRufoxPolicy(nsACString& aResult) {
 
 
 PATHS = [
-    'security/certverifier/CertVerifier.h', 'security/certverifier/CertVerifier.cpp',
-    *('security/manager/ssl/' + name for name in (
-        'SSLServerCertVerification.h', 'SSLServerCertVerification.cpp',
-        'VerifySSLServerCertParent.h', 'VerifySSLServerCertParent.cpp',
-        'VerifySSLServerCertChild.h', 'VerifySSLServerCertChild.cpp',
-        'PVerifySSLServerCert.ipdl', 'CommonSocketControl.h', 'CommonSocketControl.cpp',
+    Path('security/certverifier/CertVerifier.h'),
+    Path('security/certverifier/CertVerifier.cpp'),
+    SSL_DIR / 'SSLServerCertVerification.h',
+    SSL_VERIFICATION_CPP,
+    *LEGACY_VERIFICATION_IPC_PATHS,
+    *(SSL_DIR / name for name in (
+        'CommonSocketControl.h', 'CommonSocketControl.cpp',
         'TransportSecurityInfo.h', 'TransportSecurityInfo.cpp', 'nsITransportSecurityInfo.idl')),
-    'netwerk/base/FuzzySecurityInfo.cpp',
+    Path('netwerk/base/FuzzySecurityInfo.cpp'),
 ]
 
 
 def install(transforms):
     for path in PATHS:
-        previous = transforms.get(Path(path), lambda s: s)
-        transforms[Path(path)] = lambda s, p=path, prev=previous: s if "// Rufox diagnostics transport" in s else transform(p, prev(s))
+        previous = transforms.get(path, lambda s: s)
+        transforms[path] = lambda s, p=path, prev=previous: s if "// Rufox diagnostics transport" in s else transform(p, prev(s))

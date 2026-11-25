@@ -12,12 +12,13 @@ import re
 import shutil
 import urllib.request
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 try:
-    from . import native_policy
+    from . import native_policy, native_reporting
 except ImportError:
     import native_policy
+    import native_reporting
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -434,14 +435,35 @@ TRANSFORMS: dict[Path, Callable[[str], str]] = {
 native_policy.install(TRANSFORMS)
 
 
-def patch_checkout(source_root: Path, der: bytes) -> list[Path]:
-    changed: list[Path] = []
+def patch_sources(
+    read_source: Callable[[Path], str],
+) -> Iterator[tuple[Path, Callable[[str], str], str]]:
+    verifier_path = native_reporting.SSL_VERIFICATION_CPP
+    verifier_source = read_source(verifier_path)
+    # Firefox 161 removed the certificate verification actor (Mozilla bug 2077172).
+    # The local verification result still carries diagnostics on both versions.
+    uses_verification_ipc = "RemoteProcessCertVerification(" in verifier_source
     for relative_path, transform in TRANSFORMS.items():
-        path = source_root / relative_path
-        original = path.read_text(encoding="utf-8")
+        if (
+            not uses_verification_ipc
+            and relative_path in native_reporting.LEGACY_VERIFICATION_IPC_PATHS
+        ):
+            continue
+        source = (
+            verifier_source if relative_path == verifier_path else read_source(relative_path)
+        )
+        yield relative_path, transform, source
+
+
+def patch_checkout(source_root: Path, der: bytes) -> list[Path]:
+    def read_source(relative_path: Path) -> str:
+        return (source_root / relative_path).read_text(encoding="utf-8")
+
+    changed: list[Path] = []
+    for relative_path, transform, original in patch_sources(read_source):
         patched = transform(original)
         if patched != original:
-            path.write_text(patched, encoding="utf-8")
+            (source_root / relative_path).write_text(patched, encoding="utf-8")
             changed.append(relative_path)
     header_path = source_root / GENERATED_HEADER
     header = generated_header(der)
@@ -494,8 +516,12 @@ def fetch_text(url: str) -> str:
 
 def check_remote(raw_base_url: str, der: bytes) -> None:
     native_policy.generated_files()  # Validate pinned log keys and intervals too.
-    for relative_path, transform in TRANSFORMS.items():
-        source = fetch_text(f"{raw_base_url.rstrip('/')}/{relative_path.as_posix()}")
+    base_url = raw_base_url.rstrip("/")
+
+    def read_source(relative_path: Path) -> str:
+        return fetch_text(f"{base_url}/{relative_path.as_posix()}")
+
+    for relative_path, transform, source in patch_sources(read_source):
         patched = transform(source)
         if patched == source:
             raise ValueError(f"remote source already appears patched: {relative_path}")
