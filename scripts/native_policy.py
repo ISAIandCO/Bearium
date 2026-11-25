@@ -92,7 +92,7 @@ def verifier_h(source: str) -> str:
 
 
 def verifier_cpp(source: str) -> str:
-    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCAIdentity.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "prtime.h"\n#include "nsReadableUtils.h"\n#include <cstring>')
+    source = once(source, '#include "CertVerifier.h"', '#include "CertVerifier.h"\n#include "RutheniumRoot.h"\n#include "RufoxCAIdentity.h"\n#include "RufoxCTLogs.h"\n#include "RufoxPolicyHelpers.h"\n#include "mozilla/Preferences.h"\n#include "prtime.h"\n#include "nsReadableUtils.h"\n#include <cstring>\n#include <memory>')
     init = """
   // Rufox extra trust is limited to TLS servers; policy is checked below.
   mTLSServerRootInputs = mThirdPartyRootInputs.Clone();
@@ -107,7 +107,7 @@ def verifier_cpp(source: str) -> str:
   Preferences::GetCString("security.rufox.session_exceptions", sessionExceptions);
   mRufoxExceptions.Append(sessionExceptions);
   mRufoxHardened = Preferences::GetBool("security.rufox.hardened", false);
-  mRufoxCTVerifier = MakeUnique<MultiLogCTVerifier>();
+  mRufoxCTVerifier = std::make_unique<MultiLogCTVerifier>();
   for (const auto& log : kRufoxCTLogs) {
     Input key;
     CTLogVerifier verifier(log.operatorId, CTLogState::Admissible,
